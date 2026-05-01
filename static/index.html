@@ -259,9 +259,7 @@
   <aside id="side"></aside>
   <section id="content"></section>
 </main>
-<script>
-/* __CCLOG_DATA__ */
-</script>
+<script src="cclog-data.js"></script>
 <script>
 const I18N = {
   ja: {
@@ -616,7 +614,19 @@ $("lang-toggle").addEventListener("click", () => {
   applyLang();
 });
 
-applyLang();
+try {
+  applyLang();
+} catch (err) {
+  $("status").textContent = "ERR";
+  $("content").innerHTML = `<div class="empty" style="color:var(--orange);white-space:pre-wrap;text-align:left;padding:24px;">JavaScript error:\n\n${esc(err && err.stack || String(err))}</div>`;
+  console.error(err);
+}
+window.addEventListener("error", e => {
+  $("status").textContent = "ERR";
+  if ($("content").children.length === 0) {
+    $("content").innerHTML = `<div class="empty" style="color:var(--orange);white-space:pre-wrap;text-align:left;padding:24px;">Runtime error: ${esc(e.message)}\n${esc(e.filename || "")} :${e.lineno || "?"}</div>`;
+  }
+});
 </script>
 </body>
 </html>

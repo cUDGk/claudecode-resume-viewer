@@ -368,22 +368,28 @@ fn main() {
         "sessions": sessions,
         "transcripts": transcripts,
     });
-    let mut payload_json = serde_json::to_string(&payload_obj).expect("serialize failed");
-    payload_json = payload_json.replace("</", "<\\/");
+    let payload_json = serde_json::to_string(&payload_obj).expect("serialize failed");
 
-    let payload = format!("window.CCLOG_DATA = {};", payload_json);
-    let html = INDEX_HTML.replacen(DATA_PLACEHOLDER, &payload, 1);
-
-    let out_path = output_html_path();
-    if let Some(parent) = out_path.parent() {
+    // Sidecar data file. Inlining 60MB+ into a single <script> turns out to be
+    // unreliable across browsers (Brave silently aborts script execution on
+    // very large inline scripts under file://). Loading via <script src=...>
+    // sidesteps that and keeps the HTML tiny.
+    let out_html = output_html_path();
+    let out_data = out_html.with_file_name("cclog-data.js");
+    if let Some(parent) = out_html.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    fs::write(&out_path, &html).expect("write failed");
+    let data_js = format!("window.CCLOG_DATA = {};\n", payload_json);
+    fs::write(&out_data, data_js.as_bytes()).expect("write data failed");
+
+    let html = INDEX_HTML.replacen(DATA_PLACEHOLDER, "", 1);
+    fs::write(&out_html, &html).expect("write html failed");
 
     println!(
-        "wrote    : {} ({:.1}MB, {} sessions, {:.2}s)",
-        out_path.display(),
+        "wrote    : {} ({:.1}MB html, {:.1}MB data, {} sessions, {:.2}s)",
+        out_html.display(),
         html.len() as f64 / 1_048_576.0,
+        data_js.len() as f64 / 1_048_576.0,
         transcripts.len(),
         start.elapsed().as_secs_f64()
     );
@@ -392,7 +398,7 @@ fn main() {
         return;
     }
 
-    open_in_browser(&out_path);
+    open_in_browser(&out_html);
 }
 
 fn open_in_browser(path: &Path) {
