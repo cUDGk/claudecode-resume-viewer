@@ -10,9 +10,9 @@
     --panel-2: #1a1a1a;
     --border: #2a2a2a;
     --border-strong: #3a3a3a;
-    --text: #d0d0d0;
-    --text-dim: #888;
-    --text-mute: #5a5a5a;
+    --text: #d8d8d8;
+    --text-dim: #999;
+    --text-mute: #666;
     --blue: #4a9eff;
     --orange: #ff8c42;
   }
@@ -21,8 +21,8 @@
   html, body { margin: 0; padding: 0; height: 100%; }
   body {
     font-family: ui-monospace, "SF Mono", Consolas, "Liberation Mono", monospace;
-    font-size: 13px;
-    line-height: 1.45;
+    font-size: 15px;
+    line-height: 1.55;
     background: var(--bg);
     color: var(--text);
     display: flex;
@@ -32,153 +32,204 @@
   header {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 6px 10px;
+    gap: 14px;
+    padding: 10px 14px;
     background: var(--panel);
     border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
   }
-  header .brand { color: var(--text-dim); font-weight: bold; letter-spacing: 1px; }
+  header .brand {
+    color: var(--text-dim);
+    font-weight: bold;
+    letter-spacing: 2px;
+    font-size: 14px;
+  }
   header input {
     flex: 1;
     background: var(--bg);
     color: var(--text);
     border: 1px solid var(--border-strong);
-    padding: 4px 8px;
+    padding: 7px 12px;
     font: inherit;
+    font-size: 14px;
     outline: none;
-    border-radius: 0;
   }
   header input:focus { border-color: var(--blue); }
-  header .status { color: var(--text-mute); font-size: 12px; min-width: 60px; text-align: right; }
+  header .status {
+    color: var(--text-mute);
+    font-size: 13px;
+    min-width: 90px;
+    text-align: right;
+  }
   main { display: flex; flex: 1; overflow: hidden; }
   #side {
-    width: 340px;
+    width: 380px;
     overflow-y: auto;
     background: var(--panel);
     border-right: 1px solid var(--border);
+    flex-shrink: 0;
   }
   .proj {
-    padding: 6px 10px 4px 10px;
+    padding: 10px 14px 7px 14px;
     color: var(--text-mute);
-    font-size: 11px;
+    font-size: 12px;
     text-transform: uppercase;
-    letter-spacing: 1px;
+    letter-spacing: 1.5px;
     border-bottom: 1px solid var(--border);
     border-top: 1px solid var(--border);
     background: var(--panel-2);
     user-select: none;
     cursor: pointer;
+    word-break: break-all;
   }
   .proj.collapsed::before { content: "+ "; }
   .proj:not(.collapsed)::before { content: "- "; }
   .sess {
-    padding: 6px 10px 6px 18px;
+    padding: 10px 14px 10px 22px;
     cursor: pointer;
     border-bottom: 1px solid var(--border);
-    border-left: 2px solid transparent;
+    border-left: 3px solid transparent;
   }
   .sess:hover { background: var(--panel-2); }
   .sess.active {
     background: var(--panel-2);
     border-left-color: var(--blue);
   }
-  .sess .title { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .sess .meta {
-    font-size: 11px;
-    color: var(--text-mute);
-    margin-top: 2px;
-    display: flex;
-    gap: 8px;
+  .sess .title {
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 14px;
   }
-  #main { flex: 1; overflow-y: auto; padding: 0; }
+  .sess .meta {
+    font-size: 12px;
+    color: var(--text-mute);
+    margin-top: 4px;
+    display: flex;
+    gap: 10px;
+  }
+  /* THIS WAS THE BUG: previously #main but the section id is #content */
+  #content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0;
+    min-width: 0;
+  }
+  .mode-bar {
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
   .msg {
     border-bottom: 1px solid var(--border);
-    padding: 8px 16px;
+    padding: 12px 20px;
   }
   .msg .role {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-mute);
-    margin-bottom: 4px;
+    margin-bottom: 6px;
     text-transform: uppercase;
-    letter-spacing: 1px;
+    letter-spacing: 1.5px;
   }
-  .msg.user .role { color: var(--blue); }
-  .msg.assistant .role { color: var(--orange); }
+  .msg.user_text .role { color: var(--blue); }
+  .msg.assistant_text .role { color: var(--orange); }
   .msg.tool_use .role { color: var(--orange); }
   .msg.tool_result .role { color: var(--text-dim); }
   .msg.thinking .role { color: var(--text-mute); }
-  .msg .body { white-space: pre-wrap; word-break: break-word; }
-  .msg.user .body { color: var(--text); }
-  .msg.assistant .body { color: var(--text); }
+  .msg .body {
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 15px;
+  }
   .msg.tool_use .body, .msg.tool_result .body, .msg.thinking .body {
     color: var(--text-dim);
-    font-size: 12px;
+    font-size: 14px;
   }
-  details { margin-top: 4px; }
+  details { margin-top: 6px; }
   details > summary {
     cursor: pointer;
     color: var(--text-mute);
     list-style: none;
     user-select: none;
-    padding: 2px 0;
+    padding: 4px 0;
+    font-size: 13px;
   }
   details > summary::before { content: "[+] "; color: var(--text-mute); }
   details[open] > summary::before { content: "[-] "; }
   details > summary:hover { color: var(--text-dim); }
   details pre {
-    margin: 4px 0 0 0;
-    padding: 8px;
+    margin: 6px 0 0 0;
+    padding: 10px;
     background: var(--bg);
     border: 1px solid var(--border);
-    overflow-x: auto;
+    overflow: auto;
     color: var(--text-dim);
-    font-size: 12px;
-    max-height: 400px;
-    overflow-y: auto;
+    font-size: 13px;
+    max-height: 480px;
   }
   pre, code { font-family: inherit; }
   .empty {
     color: var(--text-mute);
-    padding: 24px;
+    padding: 32px;
     text-align: center;
+    font-size: 14px;
   }
   .results { padding: 0; }
   .result {
-    padding: 8px 16px;
+    padding: 12px 20px;
     border-bottom: 1px solid var(--border);
     cursor: pointer;
   }
   .result:hover { background: var(--panel-2); }
   .result .head {
     color: var(--blue);
-    font-size: 11px;
-    margin-bottom: 4px;
+    font-size: 12px;
+    margin-bottom: 6px;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: baseline;
   }
-  .result .head .where { color: var(--text-mute); margin-left: 8px; text-transform: none; letter-spacing: 0; }
+  .result .head .where {
+    color: var(--text-mute);
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 12px;
+  }
+  .result .head .kind {
+    color: var(--orange);
+    font-size: 11px;
+    border: 1px solid var(--orange);
+    padding: 0 6px;
+  }
   .result .snip {
     white-space: pre-wrap;
     word-break: break-word;
     color: var(--text);
-    font-size: 12px;
+    font-size: 14px;
+    line-height: 1.55;
   }
   mark {
     background: var(--orange);
     color: var(--bg);
-    padding: 0 2px;
-    border-radius: 0;
+    padding: 0 3px;
     font-weight: bold;
   }
-  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar { width: 12px; height: 12px; }
   ::-webkit-scrollbar-track { background: var(--bg); }
   ::-webkit-scrollbar-thumb { background: var(--border-strong); }
-  ::-webkit-scrollbar-thumb:hover { background: #4a4a4a; }
+  ::-webkit-scrollbar-thumb:hover { background: #555; }
   .mode-tag {
     display: inline-block;
-    padding: 0 6px;
-    margin-right: 6px;
-    font-size: 11px;
+    padding: 2px 8px;
+    margin-right: 10px;
+    font-size: 12px;
     border: 1px solid var(--border-strong);
     color: var(--text-mute);
   }
@@ -189,8 +240,8 @@
     color: var(--text);
     border: 1px solid var(--border-strong);
     font: inherit;
-    font-size: 12px;
-    padding: 3px 10px;
+    font-size: 13px;
+    padding: 5px 12px;
     cursor: pointer;
     user-select: none;
   }
@@ -209,15 +260,17 @@
   <section id="content"></section>
 </main>
 <script>
+/* __CCLOG_DATA__ */
+</script>
+<script>
 const I18N = {
   ja: {
     placeholder: "検索... (Enter で実行 / Esc でクリア)",
     loading: "読み込み中...",
+    no_data: "データなし",
     sessions_count: n => `${n} セッション`,
-    err: "エラー",
     no_results: "結果なし",
     select_session: "左からセッションを選択",
-    loading_session: "読み込み中...",
     entries_count: n => `${n} 項目`,
     hits_count: n => `${n} 件`,
     searching: "検索中...",
@@ -235,13 +288,12 @@ const I18N = {
     toggle_label: "EN",
   },
   en: {
-    placeholder: "search... (Enter / Esc to clear)",
+    placeholder: "search... (Enter to run / Esc to clear)",
     loading: "loading...",
+    no_data: "NO DATA",
     sessions_count: n => `${n} sessions`,
-    err: "ERR",
     no_results: "NO RESULTS",
     select_session: "SELECT A SESSION",
-    loading_session: "loading...",
     entries_count: n => `${n} entries`,
     hits_count: n => `${n} hits`,
     searching: "searching...",
@@ -266,11 +318,14 @@ const t = (k, ...a) => {
   return typeof v === "function" ? v(...a) : v;
 };
 
-let sessions = [];
+const DATA = window.CCLOG_DATA || { sessions: [], transcripts: {} };
+const sessions = DATA.sessions || [];
+const transcripts = DATA.transcripts || {};
+
 let currentId = null;
-let mode = "empty";        // "empty" | "session" | "search"
-let lastResults = null;
+let mode = "empty";          // "empty" | "session" | "search"
 let lastQuery = "";
+let lastResults = null;
 const collapsed = new Set();
 
 const $ = id => document.getElementById(id);
@@ -290,7 +345,6 @@ function fmtSize(b) {
   if (b < 1024*1024) return (b/1024).toFixed(0) + "K";
   return (b/1024/1024).toFixed(1) + "M";
 }
-// Properly escape + highlight: split on regex matches, escape each fragment
 function highlight(text, q) {
   if (!q) return esc(text);
   const escQ = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -307,30 +361,21 @@ function highlight(text, q) {
   parts.push(esc(text.slice(last)));
   return parts.join("");
 }
-
 function setStatus(s) { $("status").textContent = s; }
 
 function applyLang() {
   $("q").placeholder = t("placeholder");
   $("lang-toggle").textContent = t("toggle_label");
-  if (mode === "empty") $("content").innerHTML = `<div class="empty">${t("select_session")}</div>`;
-  else if (mode === "session" && currentId) renderSession(window._lastSessionData);
-  else if (mode === "search") renderResults(lastQuery, lastResults || []);
-  if (sessions.length > 0) setStatus(t("sessions_count", sessions.length));
+  if (sessions.length === 0) setStatus(t("no_data"));
+  else setStatus(t("sessions_count", sessions.length));
   renderSide();
-}
-
-async function load() {
-  setStatus(t("loading"));
-  try {
-    sessions = await fetch("/api/sessions").then(r => r.json());
-  } catch (e) {
-    setStatus(t("err"));
-    return;
+  if (mode === "empty") {
+    $("content").innerHTML = `<div class="empty">${t("select_session")}</div>`;
+  } else if (mode === "session" && currentId) {
+    renderSession(currentId);
+  } else if (mode === "search") {
+    renderResults(lastQuery, lastResults || []);
   }
-  setStatus(t("sessions_count", sessions.length));
-  renderSide();
-  if (mode === "empty") $("content").innerHTML = `<div class="empty">${t("select_session")}</div>`;
 }
 
 function renderSide() {
@@ -338,10 +383,10 @@ function renderSide() {
   const groups = {};
   for (const s of sessions) (groups[s.cwd || "(unknown)"] ??= []).push(s);
   const cwds = Object.keys(groups).sort((a,b) =>
-    Math.max(...groups[b].map(x => x.modified)) - Math.max(...groups[a].map(x => x.modified)));
+    Math.max(...groups[b].map(x => x.modified || 0)) - Math.max(...groups[a].map(x => x.modified || 0)));
   side.innerHTML = "";
   for (const cwd of cwds) {
-    const list = groups[cwd].sort((a,b) => b.modified - a.modified);
+    const list = groups[cwd].sort((a,b) => (b.modified || 0) - (a.modified || 0));
     const isCollapsed = collapsed.has(cwd);
     const proj = document.createElement("div");
     proj.className = "proj" + (isCollapsed ? " collapsed" : "");
@@ -370,37 +415,39 @@ function renderSide() {
   }
 }
 
-async function openSession(id, scrollLine) {
+function openSession(id, scrollLine) {
   currentId = id;
   mode = "session";
   document.querySelectorAll(".sess").forEach(e =>
     e.classList.toggle("active", e.dataset.id === id));
-  setStatus(t("loading_session"));
-  const data = await fetch("/api/session/" + encodeURIComponent(id)).then(r => r.json());
-  window._lastSessionData = data;
-  renderSession(data, scrollLine);
+  renderSession(id, scrollLine);
 }
 
-function renderSession(data, scrollLine) {
-  if (!data) return;
+function renderSession(id, scrollLine) {
+  const messages = transcripts[id] || [];
   const main = $("content");
   main.innerHTML = "";
   const tag = document.createElement("div");
-  tag.style.padding = "6px 16px";
-  tag.style.borderBottom = "1px solid var(--border)";
-  tag.style.background = "var(--panel)";
-  tag.innerHTML = `<span class="mode-tag session">${esc(t("mode_session"))}</span><span style="color:var(--text-dim)">${esc(currentId || "")}</span>`;
+  tag.className = "mode-bar";
+  tag.innerHTML = `<span class="mode-tag session">${esc(t("mode_session"))}</span><span style="color:var(--text-dim)">${esc(id)}</span>`;
   main.appendChild(tag);
   const wrap = document.createElement("div");
   main.appendChild(wrap);
-  for (const m of data.messages) wrap.appendChild(renderMsg(m));
-  setStatus(t("entries_count", data.messages.length));
-  if (scrollLine != null) {
-    const target = wrap.querySelector(`[data-line="${scrollLine}"]`);
-    if (target) target.scrollIntoView({behavior: "smooth", block: "center"});
-  } else {
-    main.scrollTop = 0;
-  }
+  for (const m of messages) wrap.appendChild(renderMsg(m));
+  setStatus(t("entries_count", messages.length));
+  // scroll AFTER the layout is settled
+  requestAnimationFrame(() => {
+    if (scrollLine != null) {
+      const target = wrap.querySelector(`[data-line="${scrollLine}"]`);
+      if (target) {
+        target.scrollIntoView({behavior: "smooth", block: "center"});
+      } else {
+        main.scrollTop = 0;
+      }
+    } else {
+      main.scrollTop = 0;
+    }
+  });
 }
 
 function renderMsg(m) {
@@ -418,7 +465,7 @@ function renderMsg(m) {
   } else if (m.kind === "thinking") {
     header = t("role_thinking");
     const tx = m.text || "";
-    body = `<details><summary>${esc(tx.slice(0,120))}${tx.length>120?"...":""}</summary><pre>${esc(tx)}</pre></details>`;
+    body = `<details><summary>${esc(tx.slice(0,140))}${tx.length>140?"...":""}</summary><pre>${esc(tx)}</pre></details>`;
   } else if (m.kind === "tool_use") {
     header = `${t("role_tool")} > ${m.name || "?"}`;
     body = `<details><summary>${esc(t("label_input"))}</summary><pre>${esc(JSON.stringify(m.input, null, 2))}</pre></details>`;
@@ -427,8 +474,8 @@ function renderMsg(m) {
     let text = m.content;
     if (typeof text !== "string") text = JSON.stringify(text, null, 2);
     if (text == null) text = "";
-    const preview = text.slice(0, 120).replace(/\n/g, " ");
-    body = `<details><summary>${esc(preview)}${text.length>120?"...":""}</summary><pre>${esc(text)}</pre></details>`;
+    const preview = text.slice(0, 140).replace(/\s+/g, " ");
+    body = `<details><summary>${esc(preview)}${text.length>140?"...":""}</summary><pre>${esc(text)}</pre></details>`;
   } else {
     header = t("role_unknown");
     body = `<pre>${esc(JSON.stringify(m, null, 2))}</pre>`;
@@ -437,45 +484,78 @@ function renderMsg(m) {
   return el;
 }
 
-const qInput = $("q");
-qInput.addEventListener("keydown", e => {
-  if (e.key === "Enter") {
-    e.preventDefault();
-    runSearch(qInput.value.trim());
-  } else if (e.key === "Escape") {
-    qInput.value = "";
-    lastQuery = "";
-    lastResults = null;
-    if (currentId) { mode = "session"; openSession(currentId); }
-    else { mode = "empty"; $("content").innerHTML = `<div class="empty">${t("select_session")}</div>`; }
+// Pull all searchable text from a parsed message
+function msgSearchableText(m) {
+  if (m.kind === "user_text" || m.kind === "assistant_text" || m.kind === "thinking") return m.text || "";
+  if (m.kind === "tool_use") {
+    const name = m.name || "";
+    const input = m.input == null ? "" : (typeof m.input === "string" ? m.input : JSON.stringify(m.input));
+    return name + " " + input;
   }
-});
+  if (m.kind === "tool_result") {
+    const c = m.content;
+    if (c == null) return "";
+    return typeof c === "string" ? c : JSON.stringify(c);
+  }
+  return "";
+}
 
-async function runSearch(q) {
-  if (!q) return;
-  lastQuery = q;
-  mode = "search";
-  setStatus(t("searching"));
-  const r = await fetch("/api/search?q=" + encodeURIComponent(q)).then(r => r.json());
-  lastResults = r;
-  setStatus(t("hits_count", r.length));
-  renderResults(q, r);
+function snippetAround(s, qLow, span = 100) {
+  const lt = s.toLowerCase();
+  const idx = lt.indexOf(qLow);
+  if (idx < 0) return s.slice(0, 200);
+  const start = Math.max(0, idx - 60);
+  const end = Math.min(s.length, idx + qLow.length + span);
+  let out = s.slice(start, end);
+  if (start > 0) out = "…" + out;
+  if (end < s.length) out += "…";
+  return out;
+}
+
+const SEARCH_LIMIT = 500;
+
+function clientSearch(q) {
+  const qLow = q.toLowerCase();
+  const out = [];
+  // Dedup key uses session_id + kind + line + first 80 chars of snippet
+  // (server-side already deduped messages, so this is mainly safety net)
+  const seen = new Set();
+  for (const sess of sessions) {
+    const msgs = transcripts[sess.id] || [];
+    for (const m of msgs) {
+      const text = msgSearchableText(m);
+      if (!text) continue;
+      const lt = text.toLowerCase();
+      if (!lt.includes(qLow)) continue;
+      const snip = snippetAround(text, qLow, 120);
+      const key = sess.id + "|" + m.kind + "|" + m.line + "|" + snip.slice(0, 80);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        session_id: sess.id,
+        kind: m.kind,
+        line: m.line,
+        snippet: snip,
+      });
+      if (out.length >= SEARCH_LIMIT) return out;
+    }
+  }
+  return out;
 }
 
 function renderResults(q, results) {
   const main = $("content");
   main.innerHTML = "";
   const tag = document.createElement("div");
-  tag.style.padding = "6px 16px";
-  tag.style.borderBottom = "1px solid var(--border)";
-  tag.style.background = "var(--panel)";
+  tag.className = "mode-bar";
   tag.innerHTML = `<span class="mode-tag search">${esc(t("mode_search"))}</span><span style="color:var(--text-dim)">"${esc(q)}" - ${t("hits_count", results.length)}</span>`;
   main.appendChild(tag);
-  if (results.length === 0) {
+  if (!results || results.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty";
     empty.textContent = t("no_results");
     main.appendChild(empty);
+    main.scrollTop = 0;
     return;
   }
   const wrap = document.createElement("div");
@@ -489,11 +569,45 @@ function renderResults(q, results) {
     const el = document.createElement("div");
     el.className = "result";
     el.innerHTML = `
-      <div class="head">${esc(title)}<span class="where">${esc(where)}</span></div>
+      <div class="head">
+        <span>${esc(title)}</span>
+        <span class="kind">${esc(r.kind || "")}</span>
+        <span class="where">${esc(where)}</span>
+      </div>
       <div class="snip">${highlight(r.snippet, q)}</div>`;
     el.onclick = () => openSession(r.session_id, r.line);
     wrap.appendChild(el);
   }
+  // Reset scroll for new results
+  requestAnimationFrame(() => { main.scrollTop = 0; });
+}
+
+const qInput = $("q");
+qInput.addEventListener("keydown", e => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    runSearch(qInput.value.trim());
+  } else if (e.key === "Escape") {
+    qInput.value = "";
+    lastQuery = "";
+    lastResults = null;
+    if (currentId) { mode = "session"; renderSession(currentId); }
+    else { mode = "empty"; $("content").innerHTML = `<div class="empty">${t("select_session")}</div>`; }
+  }
+});
+
+function runSearch(q) {
+  if (!q) return;
+  lastQuery = q;
+  mode = "search";
+  setStatus(t("searching"));
+  // run in next frame so the status update paints first
+  requestAnimationFrame(() => {
+    const r = clientSearch(q);
+    lastResults = r;
+    setStatus(t("hits_count", r.length));
+    renderResults(q, r);
+  });
 }
 
 $("lang-toggle").addEventListener("click", () => {
@@ -503,7 +617,6 @@ $("lang-toggle").addEventListener("click", () => {
 });
 
 applyLang();
-load();
 </script>
 </body>
 </html>

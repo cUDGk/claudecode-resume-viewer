@@ -1,16 +1,16 @@
 use std::{
+    collections::{HashMap, HashSet},
     fs::{self, File},
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
-    sync::Arc,
-    thread,
+    process::Command,
     time::SystemTime,
 };
 
 use serde_json::{json, Value};
-use tiny_http::{Header, Method, Request, Response, Server};
 
 const INDEX_HTML: &str = include_str!("../static/index.html");
+const DATA_PLACEHOLDER: &str = "/* __CCLOG_DATA__ */";
 
 fn projects_root() -> PathBuf {
     let home = std::env::var("USERPROFILE")
@@ -19,8 +19,14 @@ fn projects_root() -> PathBuf {
     PathBuf::from(home).join(".claude").join("projects")
 }
 
+fn output_html_path() -> PathBuf {
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .expect("USERPROFILE / HOME not set");
+    PathBuf::from(home).join(".claude").join("cclog-view.html")
+}
+
 fn list_jsonl(root: &Path) -> Vec<(PathBuf, String, String)> {
-    // (path, session_id, project_dir_name)
     let mut out = Vec::new();
     let projs = match fs::read_dir(root) {
         Ok(d) => d,
@@ -49,54 +55,6 @@ fn list_jsonl(root: &Path) -> Vec<(PathBuf, String, String)> {
     out
 }
 
-struct Meta {
-    title: String,
-    first_msg: String,
-    msg_count: u32,
-    cwd: String,
-}
-
-fn scan_meta(path: &Path) -> Meta {
-    let mut m = Meta {
-        title: String::new(),
-        first_msg: String::new(),
-        msg_count: 0,
-        cwd: String::new(),
-    };
-    let f = match File::open(path) {
-        Ok(f) => f,
-        Err(_) => return m,
-    };
-    let reader = BufReader::new(f);
-    for line in reader.lines().flatten() {
-        let v: Value = match serde_json::from_str(&line) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-        if let Some(t) = v.get("type").and_then(|x| x.as_str()) {
-            if t == "ai-title" {
-                if let Some(s) = v.get("aiTitle").and_then(|x| x.as_str()) {
-                    m.title = s.to_string();
-                }
-            }
-        }
-        if m.cwd.is_empty() {
-            if let Some(c) = v.get("cwd").and_then(|x| x.as_str()) {
-                m.cwd = c.to_string();
-            }
-        }
-        if let Some(msg) = v.get("message") {
-            m.msg_count += 1;
-            if m.first_msg.is_empty() && msg.get("role").and_then(|x| x.as_str()) == Some("user") {
-                if let Some(s) = msg.get("content").and_then(|c| c.as_str()) {
-                    m.first_msg = s.chars().take(120).collect();
-                }
-            }
-        }
-    }
-    m
-}
-
 fn decode_project(name: &str) -> String {
     let bytes = name.as_bytes();
     if bytes.len() >= 3 && bytes[1] == b'-' && bytes[2] == b'-' {
@@ -108,45 +66,85 @@ fn decode_project(name: &str) -> String {
     }
 }
 
-fn list_sessions(root: &Path) -> Vec<Value> {
-    let files = list_jsonl(root);
-    let mut out = Vec::with_capacity(files.len());
-    for (path, id, proj_name) in files {
-        let fs_meta = path.metadata().ok();
-        let modified = fs_meta
-            .as_ref()
-            .and_then(|m| m.modified().ok())
-            .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0);
-        let size = fs_meta.as_ref().map(|m| m.len()).unwrap_or(0);
-        let m = scan_meta(&path);
-        let cwd = if m.cwd.is_empty() {
-            decode_project(&proj_name)
-        } else {
-            m.cwd
-        };
-        out.push(json!({
-            "id": id,
-            "project": proj_name,
-            "cwd": cwd,
-            "title": m.title,
-            "first_msg": m.first_msg,
-            "modified": modified,
-            "size": size,
-            "msg_count": m.msg_count,
-        }));
-    }
-    out
+struct ParsedSession {
+    title: String,
+    first_msg: String,
+    cwd: String,
+    messages: Vec<Value>,
 }
 
-fn parse_session(path: &Path) -> Vec<Value> {
+// Per-field byte caps. Without these, tool_result blobs (file contents,
+// command output) blow the embedded HTML up to 100MB+.
+const MAX_TEXT_BYTES: usize = 32 * 1024;
+const MAX_THINKING_BYTES: usize = 16 * 1024;
+const MAX_TOOL_INPUT_BYTES: usize = 4 * 1024;
+const MAX_TOOL_RESULT_BYTES: usize = 4 * 1024;
+
+fn floor_char_boundary(s: &str, mut i: usize) -> usize {
+    if i >= s.len() {
+        return s.len();
+    }
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
+fn truncate_str(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        return s.to_string();
+    }
+    let cut = floor_char_boundary(s, max);
+    format!(
+        "{}\n... [+{} bytes truncated]",
+        &s[..cut],
+        s.len() - cut
+    )
+}
+
+fn truncate_strings_in(v: &mut Value, max: usize) {
+    match v {
+        Value::String(s) => {
+            if s.len() > max {
+                *s = truncate_str(s, max);
+            }
+        }
+        Value::Array(a) => {
+            for item in a.iter_mut() {
+                truncate_strings_in(item, max);
+            }
+        }
+        Value::Object(o) => {
+            for (_, val) in o.iter_mut() {
+                truncate_strings_in(val, max);
+            }
+        }
+        _ => {}
+    }
+}
+
+// Parse a transcript with deduplication.
+// Claude Code records the same assistant message across multiple JSONL lines as
+// new tool_use blocks accumulate, so the same text/tool_use/tool_result blocks
+// would otherwise appear repeatedly.
+fn parse_full(path: &Path) -> ParsedSession {
+    let mut p = ParsedSession {
+        title: String::new(),
+        first_msg: String::new(),
+        cwd: String::new(),
+        messages: Vec::new(),
+    };
     let f = match File::open(path) {
         Ok(f) => f,
-        Err(_) => return Vec::new(),
+        Err(_) => return p,
     };
     let reader = BufReader::new(f);
-    let mut out = Vec::new();
+
+    let mut seen_text: HashSet<String> = HashSet::new();
+    let mut seen_thinking: HashSet<(String, String)> = HashSet::new();
+    let mut seen_tool_use: HashSet<String> = HashSet::new();
+    let mut seen_tool_result: HashSet<String> = HashSet::new();
+
     for (i, line_res) in reader.lines().enumerate() {
         let line = match line_res {
             Ok(l) => l,
@@ -157,6 +155,20 @@ fn parse_session(path: &Path) -> Vec<Value> {
             Err(_) => continue,
         };
         let line1 = (i + 1) as u32;
+
+        if let Some(t) = v.get("type").and_then(|x| x.as_str()) {
+            if t == "ai-title" {
+                if let Some(s) = v.get("aiTitle").and_then(|x| x.as_str()) {
+                    p.title = s.to_string();
+                }
+            }
+        }
+        if p.cwd.is_empty() {
+            if let Some(c) = v.get("cwd").and_then(|x| x.as_str()) {
+                p.cwd = c.to_string();
+            }
+        }
+
         if let Some(t) = v.get("type").and_then(|x| x.as_str()) {
             if matches!(
                 t,
@@ -172,32 +184,49 @@ fn parse_session(path: &Path) -> Vec<Value> {
         if v.get("attachment").is_some() {
             continue;
         }
+
         let msg = match v.get("message") {
             Some(m) => m,
             None => continue,
         };
         let role = msg.get("role").and_then(|x| x.as_str()).unwrap_or("");
+        let msg_id = msg
+            .get("id")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string();
         let content = match msg.get("content") {
             Some(c) => c,
             None => continue,
         };
+
         match content {
             Value::String(s) => {
-                let kind = if role == "user" {
-                    "user_text"
-                } else {
-                    "assistant_text"
-                };
-                out.push(json!({"kind": kind, "text": s, "line": line1}));
+                if role == "user" {
+                    if p.first_msg.is_empty() {
+                        p.first_msg = s.chars().take(120).collect();
+                    }
+                    let txt = truncate_str(s, MAX_TEXT_BYTES);
+                    p.messages
+                        .push(json!({"kind": "user_text", "text": txt, "line": line1}));
+                } else if role == "assistant" {
+                    let txt = truncate_str(s, MAX_TEXT_BYTES);
+                    p.messages
+                        .push(json!({"kind": "assistant_text", "text": txt, "line": line1}));
+                }
             }
             Value::Array(arr) => {
                 for block in arr {
                     let bt = block.get("type").and_then(|x| x.as_str()).unwrap_or("");
                     match bt {
                         "text" => {
+                            if !msg_id.is_empty() && !seen_text.insert(msg_id.clone()) {
+                                continue;
+                            }
                             let t = block.get("text").and_then(|x| x.as_str()).unwrap_or("");
-                            out.push(
-                                json!({"kind": "assistant_text", "text": t, "line": line1}),
+                            let txt = truncate_str(t, MAX_TEXT_BYTES);
+                            p.messages.push(
+                                json!({"kind": "assistant_text", "text": txt, "line": line1}),
                             );
                         }
                         "thinking" => {
@@ -205,22 +234,55 @@ fn parse_session(path: &Path) -> Vec<Value> {
                                 .get("thinking")
                                 .and_then(|x| x.as_str())
                                 .unwrap_or("");
-                            out.push(json!({"kind": "thinking", "text": t, "line": line1}));
+                            let key = (msg_id.clone(), t.chars().take(60).collect::<String>());
+                            if !msg_id.is_empty() && !seen_thinking.insert(key) {
+                                continue;
+                            }
+                            let txt = truncate_str(t, MAX_THINKING_BYTES);
+                            p.messages
+                                .push(json!({"kind": "thinking", "text": txt, "line": line1}));
                         }
                         "tool_use" => {
-                            out.push(json!({
+                            let bid = block
+                                .get("id")
+                                .and_then(|x| x.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            if !bid.is_empty() && !seen_tool_use.insert(bid) {
+                                continue;
+                            }
+                            let mut input =
+                                block.get("input").cloned().unwrap_or(Value::Null);
+                            truncate_strings_in(&mut input, MAX_TOOL_INPUT_BYTES);
+                            p.messages.push(json!({
                                 "kind": "tool_use",
                                 "name": block.get("name").cloned().unwrap_or(Value::Null),
-                                "input": block.get("input").cloned().unwrap_or(Value::Null),
+                                "input": input,
                                 "id": block.get("id").cloned().unwrap_or(Value::Null),
                                 "line": line1,
                             }));
                         }
                         "tool_result" => {
-                            out.push(json!({
+                            let tid = block
+                                .get("tool_use_id")
+                                .and_then(|x| x.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            if !tid.is_empty() && !seen_tool_result.insert(tid) {
+                                continue;
+                            }
+                            let mut tr_content =
+                                block.get("content").cloned().unwrap_or(Value::Null);
+                            // tool_result.content may be a single string OR an array of blocks
+                            if let Value::String(s) = &tr_content {
+                                tr_content = Value::String(truncate_str(s, MAX_TOOL_RESULT_BYTES));
+                            } else {
+                                truncate_strings_in(&mut tr_content, MAX_TOOL_RESULT_BYTES);
+                            }
+                            p.messages.push(json!({
                                 "kind": "tool_result",
                                 "tool_use_id": block.get("tool_use_id").cloned().unwrap_or(Value::Null),
-                                "content": block.get("content").cloned().unwrap_or(Value::Null),
+                                "content": tr_content,
                                 "line": line1,
                             }));
                         }
@@ -231,219 +293,19 @@ fn parse_session(path: &Path) -> Vec<Value> {
             _ => {}
         }
     }
-    out
-}
 
-fn search_all(root: &Path, q: &str, limit: usize) -> Vec<Value> {
-    let q_lower = q.to_lowercase();
-    let files = list_jsonl(root);
-    let mut out = Vec::new();
-    for (path, id, _) in files {
-        let f = match File::open(&path) {
-            Ok(f) => f,
-            Err(_) => continue,
-        };
-        let reader = BufReader::new(f);
-        for (i, line_res) in reader.lines().enumerate() {
-            let line = match line_res {
-                Ok(l) => l,
-                Err(_) => continue,
-            };
-            if !line.to_lowercase().contains(&q_lower) {
-                continue;
-            }
-            let snippet = extract_snippet(&line, &q_lower);
-            out.push(json!({
-                "session_id": id,
-                "line": i + 1,
-                "snippet": snippet,
-            }));
-            if out.len() >= limit {
-                return out;
-            }
-        }
-    }
-    out
-}
-
-fn extract_snippet(line: &str, q_lower: &str) -> String {
-    if let Ok(v) = serde_json::from_str::<Value>(line) {
-        if let Some(snip) = find_text_with(&v, q_lower) {
-            return snip;
-        }
-    }
-    snip_around(line, q_lower)
-}
-
-fn snip_around(s: &str, q_lower: &str) -> String {
-    let lower = s.to_lowercase();
-    let idx = lower.find(q_lower).unwrap_or(0);
-    let start = floor_char_boundary(s, idx.saturating_sub(60));
-    let end = ceil_char_boundary(s, (idx + q_lower.len() + 100).min(s.len()));
-    let mut out = s[start..end].to_string();
-    if start > 0 {
-        out.insert(0, '…');
-    }
-    if end < s.len() {
-        out.push('…');
-    }
-    out
-}
-
-fn floor_char_boundary(s: &str, mut i: usize) -> usize {
-    while i > 0 && !s.is_char_boundary(i) {
-        i -= 1;
-    }
-    i
-}
-
-fn ceil_char_boundary(s: &str, mut i: usize) -> usize {
-    while i < s.len() && !s.is_char_boundary(i) {
-        i += 1;
-    }
-    i
-}
-
-fn find_text_with(v: &Value, q_lower: &str) -> Option<String> {
-    match v {
-        Value::String(s) => {
-            if s.to_lowercase().contains(q_lower) {
-                Some(snip_around(s, q_lower))
-            } else {
-                None
-            }
-        }
-        Value::Array(a) => a.iter().find_map(|x| find_text_with(x, q_lower)),
-        Value::Object(o) => o.values().find_map(|x| find_text_with(x, q_lower)),
-        _ => None,
-    }
-}
-
-fn find_session_file(root: &Path, id: &str) -> Option<PathBuf> {
-    if id.contains('/') || id.contains('\\') || id.contains("..") {
-        return None;
-    }
-    let target = format!("{}.jsonl", id);
-    for entry in fs::read_dir(root).ok()?.flatten() {
-        if !entry.path().is_dir() {
-            continue;
-        }
-        let p = entry.path().join(&target);
-        if p.exists() {
-            return Some(p);
-        }
-    }
-    None
-}
-
-fn parse_query(q: &str, key: &str) -> Option<String> {
-    for part in q.split('&') {
-        if let Some((k, v)) = part.split_once('=') {
-            if k == key {
-                return Some(url_decode(v));
-            }
-        }
-    }
-    None
-}
-
-fn url_decode(s: &str) -> String {
-    let bytes = s.as_bytes();
-    let mut buf = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'+' => {
-                buf.push(b' ');
-                i += 1;
-            }
-            b'%' if i + 2 < bytes.len() => {
-                let h = std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or("");
-                if let Ok(b) = u8::from_str_radix(h, 16) {
-                    buf.push(b);
-                    i += 3;
-                } else {
-                    buf.push(b'%');
-                    i += 1;
+    if p.first_msg.is_empty() {
+        for m in &p.messages {
+            if m.get("kind").and_then(|x| x.as_str()) == Some("user_text") {
+                if let Some(t) = m.get("text").and_then(|x| x.as_str()) {
+                    p.first_msg = t.chars().take(120).collect();
+                    break;
                 }
             }
-            c => {
-                buf.push(c);
-                i += 1;
-            }
         }
     }
-    String::from_utf8_lossy(&buf).into_owned()
-}
 
-fn respond_json(req: Request, v: &Value) {
-    let body = serde_json::to_string(v).unwrap_or_else(|_| "[]".to_string());
-    let resp = Response::from_string(body).with_header(
-        Header::from_bytes(
-            b"Content-Type".as_ref(),
-            b"application/json; charset=utf-8".as_ref(),
-        )
-        .unwrap(),
-    );
-    let _ = req.respond(resp);
-}
-
-fn handle(req: Request, root: &Path) {
-    let url = req.url().to_string();
-    let path = url.split('?').next().unwrap_or("").to_string();
-    let query = url
-        .split_once('?')
-        .map(|(_, q)| q.to_string())
-        .unwrap_or_default();
-
-    if req.method() != &Method::Get {
-        let _ = req.respond(Response::from_string("405").with_status_code(405));
-        return;
-    }
-
-    if path == "/" || path == "/index.html" {
-        let resp = Response::from_string(INDEX_HTML).with_header(
-            Header::from_bytes(
-                b"Content-Type".as_ref(),
-                b"text/html; charset=utf-8".as_ref(),
-            )
-            .unwrap(),
-        );
-        let _ = req.respond(resp);
-        return;
-    }
-
-    if path == "/api/sessions" {
-        let sessions = list_sessions(root);
-        respond_json(req, &Value::Array(sessions));
-        return;
-    }
-
-    if let Some(id) = path.strip_prefix("/api/session/") {
-        if let Some(file) = find_session_file(root, id) {
-            let msgs = parse_session(&file);
-            respond_json(req, &json!({"messages": msgs}));
-        } else {
-            let _ = req.respond(Response::from_string("not found").with_status_code(404));
-        }
-        return;
-    }
-
-    if path == "/api/search" {
-        let q = parse_query(&query, "q").unwrap_or_default();
-        if q.is_empty() {
-            respond_json(req, &Value::Array(Vec::new()));
-            return;
-        }
-        let limit = parse_query(&query, "limit")
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(300);
-        let results = search_all(root, &q, limit);
-        respond_json(req, &Value::Array(results));
-        return;
-    }
-
-    let _ = req.respond(Response::from_string("not found").with_status_code(404));
+    p
 }
 
 fn main() {
@@ -452,13 +314,99 @@ fn main() {
         eprintln!("not found: {}", root.display());
         std::process::exit(1);
     }
-    let addr = std::env::var("CCLOG_ADDR").unwrap_or_else(|_| "127.0.0.1:7777".to_string());
-    let server = Server::http(&addr).expect("bind failed");
-    println!("cclog viewer: http://{}", addr);
-    println!("scanning   : {}", root.display());
-    let root = Arc::new(root);
-    for req in server.incoming_requests() {
-        let r = Arc::clone(&root);
-        thread::spawn(move || handle(req, &r));
+    let start = std::time::Instant::now();
+
+    println!("scanning : {}", root.display());
+    let files = list_jsonl(&root);
+    let total = files.len();
+    let mut sessions: Vec<Value> = Vec::with_capacity(total);
+    let mut transcripts: HashMap<String, Vec<Value>> = HashMap::with_capacity(total);
+
+    for (idx, (path, id, proj_name)) in files.into_iter().enumerate() {
+        let fs_meta = path.metadata().ok();
+        let modified = fs_meta
+            .as_ref()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        let size = fs_meta.as_ref().map(|m| m.len()).unwrap_or(0);
+
+        let parsed = parse_full(&path);
+
+        let cwd = if parsed.cwd.is_empty() {
+            decode_project(&proj_name)
+        } else {
+            parsed.cwd
+        };
+
+        sessions.push(json!({
+            "id": &id,
+            "project": proj_name,
+            "cwd": cwd,
+            "title": parsed.title,
+            "first_msg": parsed.first_msg,
+            "modified": modified,
+            "size": size,
+            "msg_count": parsed.messages.len(),
+        }));
+        transcripts.insert(id, parsed.messages);
+
+        if (idx + 1) % 20 == 0 || idx + 1 == total {
+            println!("parsed   : {}/{}", idx + 1, total);
+        }
+    }
+
+    sessions.sort_by(|a, b| {
+        b.get("modified")
+            .and_then(|x| x.as_i64())
+            .unwrap_or(0)
+            .cmp(&a.get("modified").and_then(|x| x.as_i64()).unwrap_or(0))
+    });
+
+    let payload_obj = json!({
+        "sessions": sessions,
+        "transcripts": transcripts,
+    });
+    let mut payload_json = serde_json::to_string(&payload_obj).expect("serialize failed");
+    payload_json = payload_json.replace("</", "<\\/");
+
+    let payload = format!("window.CCLOG_DATA = {};", payload_json);
+    let html = INDEX_HTML.replacen(DATA_PLACEHOLDER, &payload, 1);
+
+    let out_path = output_html_path();
+    if let Some(parent) = out_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    fs::write(&out_path, &html).expect("write failed");
+
+    println!(
+        "wrote    : {} ({:.1}MB, {} sessions, {:.2}s)",
+        out_path.display(),
+        html.len() as f64 / 1_048_576.0,
+        transcripts.len(),
+        start.elapsed().as_secs_f64()
+    );
+
+    if std::env::args().any(|a| a == "--no-open") {
+        return;
+    }
+
+    open_in_browser(&out_path);
+}
+
+fn open_in_browser(path: &Path) {
+    let p = path.to_string_lossy().into_owned();
+    #[cfg(target_os = "windows")]
+    {
+        let _ = Command::new("cmd").args(["/C", "start", "", &p]).spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = Command::new("open").arg(&p).spawn();
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let _ = Command::new("xdg-open").arg(&p).spawn();
     }
 }
