@@ -184,67 +184,161 @@
   }
   .mode-tag.search { color: var(--orange); border-color: var(--orange); }
   .mode-tag.session { color: var(--blue); border-color: var(--blue); }
+  .lang-toggle {
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border-strong);
+    font: inherit;
+    font-size: 12px;
+    padding: 3px 10px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .lang-toggle:hover { border-color: var(--blue); color: var(--blue); }
 </style>
 </head>
 <body>
 <header>
   <span class="brand">CCLOG</span>
-  <input id="q" placeholder="search... (Enter / Esc to clear)" autocomplete="off">
+  <input id="q" autocomplete="off">
+  <button id="lang-toggle" class="lang-toggle"></button>
   <span class="status" id="status"></span>
 </header>
 <main>
   <aside id="side"></aside>
-  <section id="content"><div class="empty">SELECT A SESSION</div></section>
+  <section id="content"></section>
 </main>
 <script>
+const I18N = {
+  ja: {
+    placeholder: "検索... (Enter で実行 / Esc でクリア)",
+    loading: "読み込み中...",
+    sessions_count: n => `${n} セッション`,
+    err: "エラー",
+    no_results: "結果なし",
+    select_session: "左からセッションを選択",
+    loading_session: "読み込み中...",
+    entries_count: n => `${n} 項目`,
+    hits_count: n => `${n} 件`,
+    searching: "検索中...",
+    mode_session: "セッション",
+    mode_search: "検索",
+    role_user: "ユーザー",
+    role_assistant: "アシスタント",
+    role_thinking: "思考",
+    role_tool: "ツール",
+    role_result: "結果",
+    role_unknown: "不明",
+    label_input: "入力",
+    msg_unit: "件",
+    line_label: "行",
+    toggle_label: "EN",
+  },
+  en: {
+    placeholder: "search... (Enter / Esc to clear)",
+    loading: "loading...",
+    sessions_count: n => `${n} sessions`,
+    err: "ERR",
+    no_results: "NO RESULTS",
+    select_session: "SELECT A SESSION",
+    loading_session: "loading...",
+    entries_count: n => `${n} entries`,
+    hits_count: n => `${n} hits`,
+    searching: "searching...",
+    mode_session: "SESSION",
+    mode_search: "SEARCH",
+    role_user: "USER",
+    role_assistant: "ASSISTANT",
+    role_thinking: "THINKING",
+    role_tool: "TOOL",
+    role_result: "RESULT",
+    role_unknown: "?",
+    label_input: "input",
+    msg_unit: "msg",
+    line_label: "line",
+    toggle_label: "JA",
+  },
+};
+
+let lang = localStorage.getItem("cclog-lang") || "ja";
+const t = (k, ...a) => {
+  const v = I18N[lang][k];
+  return typeof v === "function" ? v(...a) : v;
+};
+
 let sessions = [];
 let currentId = null;
+let mode = "empty";        // "empty" | "session" | "search"
+let lastResults = null;
 let lastQuery = "";
 const collapsed = new Set();
 
+const $ = id => document.getElementById(id);
+
 function esc(s) {
-  return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  return String(s == null ? "" : s).replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 function fmtDate(ms) {
   if (!ms) return "";
   const d = new Date(ms);
-  const pad = n => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const p = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 function fmtSize(b) {
   if (b < 1024) return b + "B";
   if (b < 1024*1024) return (b/1024).toFixed(0) + "K";
   return (b/1024/1024).toFixed(1) + "M";
 }
+// Properly escape + highlight: split on regex matches, escape each fragment
 function highlight(text, q) {
   if (!q) return esc(text);
-  const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
-  return esc(text).replace(new RegExp(re.source.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), "<<<HL>>>$&<<<\/HL>>>")
-    .replace(/<<<HL>>>/g, "<mark>").replace(/<<<\/HL>>>/g, "</mark>");
+  const escQ = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(escQ, "gi");
+  const parts = [];
+  let last = 0;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    parts.push(esc(text.slice(last, m.index)));
+    parts.push(`<mark>${esc(m[0])}</mark>`);
+    last = m.index + m[0].length;
+    if (m[0].length === 0) re.lastIndex++;
+  }
+  parts.push(esc(text.slice(last)));
+  return parts.join("");
+}
+
+function setStatus(s) { $("status").textContent = s; }
+
+function applyLang() {
+  $("q").placeholder = t("placeholder");
+  $("lang-toggle").textContent = t("toggle_label");
+  if (mode === "empty") $("content").innerHTML = `<div class="empty">${t("select_session")}</div>`;
+  else if (mode === "session" && currentId) renderSession(window._lastSessionData);
+  else if (mode === "search") renderResults(lastQuery, lastResults || []);
+  if (sessions.length > 0) setStatus(t("sessions_count", sessions.length));
+  renderSide();
 }
 
 async function load() {
-  setStatus("loading...");
+  setStatus(t("loading"));
   try {
     sessions = await fetch("/api/sessions").then(r => r.json());
-  } catch(e) {
-    setStatus("ERR");
+  } catch (e) {
+    setStatus(t("err"));
     return;
   }
-  setStatus(sessions.length + " sessions");
+  setStatus(t("sessions_count", sessions.length));
   renderSide();
+  if (mode === "empty") $("content").innerHTML = `<div class="empty">${t("select_session")}</div>`;
 }
-function setStatus(s) { document.getElementById("status").textContent = s; }
 
 function renderSide() {
-  const side = document.getElementById("side");
+  const side = $("side");
   const groups = {};
   for (const s of sessions) (groups[s.cwd || "(unknown)"] ??= []).push(s);
-  const cwds = Object.keys(groups).sort((a,b) => {
-    const ma = Math.max(...groups[a].map(x => x.modified));
-    const mb = Math.max(...groups[b].map(x => x.modified));
-    return mb - ma;
-  });
+  const cwds = Object.keys(groups).sort((a,b) =>
+    Math.max(...groups[b].map(x => x.modified)) - Math.max(...groups[a].map(x => x.modified)));
   side.innerHTML = "";
   for (const cwd of cwds) {
     const list = groups[cwd].sort((a,b) => b.modified - a.modified);
@@ -267,7 +361,7 @@ function renderSide() {
         <div class="title">${esc(title)}</div>
         <div class="meta">
           <span>${fmtDate(s.modified)}</span>
-          <span>${s.msg_count || 0} msg</span>
+          <span>${s.msg_count || 0} ${t("msg_unit")}</span>
           <span>${fmtSize(s.size || 0)}</span>
         </div>`;
       el.onclick = () => openSession(s.id);
@@ -278,25 +372,32 @@ function renderSide() {
 
 async function openSession(id, scrollLine) {
   currentId = id;
+  mode = "session";
   document.querySelectorAll(".sess").forEach(e =>
     e.classList.toggle("active", e.dataset.id === id));
-  setStatus("loading session...");
+  setStatus(t("loading_session"));
   const data = await fetch("/api/session/" + encodeURIComponent(id)).then(r => r.json());
-  const main = document.getElementById("content");
+  window._lastSessionData = data;
+  renderSession(data, scrollLine);
+}
+
+function renderSession(data, scrollLine) {
+  if (!data) return;
+  const main = $("content");
   main.innerHTML = "";
   const tag = document.createElement("div");
   tag.style.padding = "6px 16px";
   tag.style.borderBottom = "1px solid var(--border)";
   tag.style.background = "var(--panel)";
-  tag.innerHTML = `<span class="mode-tag session">SESSION</span><span style="color:var(--text-dim)">${esc(id)}</span>`;
+  tag.innerHTML = `<span class="mode-tag session">${esc(t("mode_session"))}</span><span style="color:var(--text-dim)">${esc(currentId || "")}</span>`;
   main.appendChild(tag);
   const wrap = document.createElement("div");
   main.appendChild(wrap);
   for (const m of data.messages) wrap.appendChild(renderMsg(m));
-  setStatus(data.messages.length + " entries");
+  setStatus(t("entries_count", data.messages.length));
   if (scrollLine != null) {
-    const t = wrap.querySelector(`[data-line="${scrollLine}"]`);
-    if (t) t.scrollIntoView({behavior: "smooth", block: "center"});
+    const target = wrap.querySelector(`[data-line="${scrollLine}"]`);
+    if (target) target.scrollIntoView({behavior: "smooth", block: "center"});
   } else {
     main.scrollTop = 0;
   }
@@ -309,35 +410,34 @@ function renderMsg(m) {
   let header = "";
   let body = "";
   if (m.kind === "user_text") {
-    header = "USER";
+    header = t("role_user");
     body = `<div class="body">${esc(m.text)}</div>`;
   } else if (m.kind === "assistant_text") {
-    header = "ASSISTANT";
+    header = t("role_assistant");
     body = `<div class="body">${esc(m.text)}</div>`;
   } else if (m.kind === "thinking") {
-    header = "THINKING";
-    const t = m.text || "";
-    body = `<details><summary>${esc(t.slice(0,120))}${t.length>120?"...":""}</summary><pre>${esc(t)}</pre></details>`;
+    header = t("role_thinking");
+    const tx = m.text || "";
+    body = `<details><summary>${esc(tx.slice(0,120))}${tx.length>120?"...":""}</summary><pre>${esc(tx)}</pre></details>`;
   } else if (m.kind === "tool_use") {
-    header = "TOOL > " + (m.name || "?");
-    body = `<details><summary>input</summary><pre>${esc(JSON.stringify(m.input, null, 2))}</pre></details>`;
+    header = `${t("role_tool")} > ${m.name || "?"}`;
+    body = `<details><summary>${esc(t("label_input"))}</summary><pre>${esc(JSON.stringify(m.input, null, 2))}</pre></details>`;
   } else if (m.kind === "tool_result") {
-    header = "RESULT";
+    header = t("role_result");
     let text = m.content;
     if (typeof text !== "string") text = JSON.stringify(text, null, 2);
     if (text == null) text = "";
     const preview = text.slice(0, 120).replace(/\n/g, " ");
     body = `<details><summary>${esc(preview)}${text.length>120?"...":""}</summary><pre>${esc(text)}</pre></details>`;
   } else {
-    header = "?";
+    header = t("role_unknown");
     body = `<pre>${esc(JSON.stringify(m, null, 2))}</pre>`;
   }
   el.innerHTML = `<div class="role">${esc(header)}</div>${body}`;
   return el;
 }
 
-const qInput = document.getElementById("q");
-let searchTimer = null;
+const qInput = $("q");
 qInput.addEventListener("keydown", e => {
   if (e.key === "Enter") {
     e.preventDefault();
@@ -345,33 +445,36 @@ qInput.addEventListener("keydown", e => {
   } else if (e.key === "Escape") {
     qInput.value = "";
     lastQuery = "";
-    if (currentId) openSession(currentId);
-    else { document.getElementById("content").innerHTML = '<div class="empty">SELECT A SESSION</div>'; }
+    lastResults = null;
+    if (currentId) { mode = "session"; openSession(currentId); }
+    else { mode = "empty"; $("content").innerHTML = `<div class="empty">${t("select_session")}</div>`; }
   }
 });
 
 async function runSearch(q) {
   if (!q) return;
   lastQuery = q;
-  setStatus("searching...");
+  mode = "search";
+  setStatus(t("searching"));
   const r = await fetch("/api/search?q=" + encodeURIComponent(q)).then(r => r.json());
-  setStatus(r.length + " hits");
+  lastResults = r;
+  setStatus(t("hits_count", r.length));
   renderResults(q, r);
 }
 
 function renderResults(q, results) {
-  const main = document.getElementById("content");
+  const main = $("content");
   main.innerHTML = "";
   const tag = document.createElement("div");
   tag.style.padding = "6px 16px";
   tag.style.borderBottom = "1px solid var(--border)";
   tag.style.background = "var(--panel)";
-  tag.innerHTML = `<span class="mode-tag search">SEARCH</span><span style="color:var(--text-dim)">"${esc(q)}" - ${results.length} hits</span>`;
+  tag.innerHTML = `<span class="mode-tag search">${esc(t("mode_search"))}</span><span style="color:var(--text-dim)">"${esc(q)}" - ${t("hits_count", results.length)}</span>`;
   main.appendChild(tag);
   if (results.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty";
-    empty.textContent = "NO RESULTS";
+    empty.textContent = t("no_results");
     main.appendChild(empty);
     return;
   }
@@ -382,7 +485,7 @@ function renderResults(q, results) {
     const sess = sessions.find(s => s.id === r.session_id);
     const title = sess ? (sess.title || sess.first_msg || sess.id) : r.session_id;
     const cwd = sess ? sess.cwd : "";
-    const where = `${cwd} - line ${r.line}`;
+    const where = `${cwd} - ${t("line_label")} ${r.line}`;
     const el = document.createElement("div");
     el.className = "result";
     el.innerHTML = `
@@ -393,6 +496,13 @@ function renderResults(q, results) {
   }
 }
 
+$("lang-toggle").addEventListener("click", () => {
+  lang = lang === "ja" ? "en" : "ja";
+  localStorage.setItem("cclog-lang", lang);
+  applyLang();
+});
+
+applyLang();
 load();
 </script>
 </body>
