@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="ja">
+<html lang="ja" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <title>cclog</title>
 <style>
-  :root {
+  :root, [data-theme="dark"] {
     --bg: #0a0a0a;
     --panel: #141414;
     --panel-2: #1a1a1a;
@@ -15,6 +15,22 @@
     --text-mute: #666;
     --blue: #4a9eff;
     --orange: #ff8c42;
+    --hi-bg: #ff8c42;
+    --hi-fg: #0a0a0a;
+  }
+  [data-theme="light"] {
+    --bg: #f5f5f4;
+    --panel: #ffffff;
+    --panel-2: #ebebe8;
+    --border: #d4d4d2;
+    --border-strong: #a8a8a6;
+    --text: #1a1a1a;
+    --text-dim: #555;
+    --text-mute: #888;
+    --blue: #0064d0;
+    --orange: #c2410c;
+    --hi-bg: #fde68a;
+    --hi-fg: #1a1a1a;
   }
   * { box-sizing: border-box; border-radius: 0 !important; }
   input, button, textarea, select { border-radius: 0; }
@@ -109,7 +125,6 @@
     display: flex;
     gap: 10px;
   }
-  /* THIS WAS THE BUG: previously #main but the section id is #content */
   #content {
     flex: 1;
     overflow-y: auto;
@@ -123,6 +138,17 @@
     position: sticky;
     top: 0;
     z-index: 1;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .mode-bar .session-id {
+    color: var(--text-dim);
+    font-size: 13px;
+    word-break: break-all;
+    flex: 1;
+    min-width: 0;
   }
   .msg {
     border-bottom: 1px solid var(--border);
@@ -178,64 +204,90 @@
     text-align: center;
     font-size: 14px;
   }
+  /* Search results - grouped by session */
   .results { padding: 0; }
-  .result {
-    padding: 12px 20px;
+  .result-group {
     border-bottom: 1px solid var(--border);
-    cursor: pointer;
   }
-  .result:hover { background: var(--panel-2); }
-  .result .head {
-    color: var(--blue);
-    font-size: 12px;
-    margin-bottom: 6px;
-    text-transform: uppercase;
-    letter-spacing: 0.8px;
+  .result-group-head {
+    padding: 12px 20px;
+    background: var(--panel-2);
+    cursor: pointer;
     display: flex;
+    align-items: baseline;
     flex-wrap: wrap;
     gap: 10px;
-    align-items: baseline;
   }
-  .result .head .where {
+  .result-group-head:hover { background: var(--border); }
+  .result-group-head .gtitle {
+    color: var(--blue);
+    font-size: 14px;
+    font-weight: bold;
+  }
+  .result-group-head .gcount {
+    color: var(--orange);
+    font-size: 12px;
+    border: 1px solid var(--orange);
+    padding: 1px 8px;
+    text-transform: uppercase;
+  }
+  .result-group-head .gcwd {
     color: var(--text-mute);
-    text-transform: none;
-    letter-spacing: 0;
     font-size: 12px;
   }
-  .result .head .kind {
+  .result-hit {
+    padding: 8px 20px 8px 36px;
+    border-top: 1px dashed var(--border);
+    cursor: pointer;
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+    flex-wrap: wrap;
+  }
+  .result-hit:hover { background: var(--panel-2); }
+  .result-hit .hkind {
     color: var(--orange);
     font-size: 11px;
     border: 1px solid var(--orange);
     padding: 0 6px;
+    flex-shrink: 0;
+    text-transform: uppercase;
   }
-  .result .snip {
+  .result-hit .hline {
+    color: var(--text-mute);
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+  .result-hit .hsnip {
+    color: var(--text);
+    font-size: 13px;
+    line-height: 1.5;
     white-space: pre-wrap;
     word-break: break-word;
-    color: var(--text);
-    font-size: 14px;
-    line-height: 1.55;
+    flex: 1;
+    min-width: 0;
   }
   mark {
-    background: var(--orange);
-    color: var(--bg);
+    background: var(--hi-bg);
+    color: var(--hi-fg);
     padding: 0 3px;
     font-weight: bold;
   }
   ::-webkit-scrollbar { width: 12px; height: 12px; }
   ::-webkit-scrollbar-track { background: var(--bg); }
   ::-webkit-scrollbar-thumb { background: var(--border-strong); }
-  ::-webkit-scrollbar-thumb:hover { background: #555; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-mute); }
   .mode-tag {
     display: inline-block;
     padding: 2px 8px;
-    margin-right: 10px;
     font-size: 12px;
     border: 1px solid var(--border-strong);
     color: var(--text-mute);
+    flex-shrink: 0;
   }
   .mode-tag.search { color: var(--orange); border-color: var(--orange); }
   .mode-tag.session { color: var(--blue); border-color: var(--blue); }
-  .lang-toggle {
+  .btn {
     background: var(--bg);
     color: var(--text);
     border: 1px solid var(--border-strong);
@@ -244,15 +296,19 @@
     padding: 5px 12px;
     cursor: pointer;
     user-select: none;
+    flex-shrink: 0;
   }
-  .lang-toggle:hover { border-color: var(--blue); color: var(--blue); }
+  .btn:hover { border-color: var(--blue); color: var(--blue); }
+  .btn.back { border-color: var(--blue); color: var(--blue); }
+  .btn.copy.copied { border-color: var(--orange); color: var(--orange); }
 </style>
 </head>
 <body>
 <header>
   <span class="brand">CCLOG</span>
   <input id="q" autocomplete="off">
-  <button id="lang-toggle" class="lang-toggle"></button>
+  <button id="theme-toggle" class="btn"></button>
+  <button id="lang-toggle" class="btn"></button>
   <span class="status" id="status"></span>
 </header>
 <main>
@@ -264,13 +320,13 @@
 const I18N = {
   ja: {
     placeholder: "検索... (Enter で実行 / Esc でクリア)",
-    loading: "読み込み中...",
     no_data: "データなし",
     sessions_count: n => `${n} セッション`,
     no_results: "結果なし",
     select_session: "左からセッションを選択",
     entries_count: n => `${n} 項目`,
     hits_count: n => `${n} 件`,
+    sessions_in_results: (s, h) => `${s} セッション / ${h} 件`,
     searching: "検索中...",
     mode_session: "セッション",
     mode_search: "検索",
@@ -283,17 +339,22 @@ const I18N = {
     label_input: "入力",
     msg_unit: "件",
     line_label: "行",
-    toggle_label: "EN",
+    back_to_search: "検索結果に戻る",
+    copy_id: "ID コピー",
+    copied: "コピー済",
+    toggle_lang: "EN",
+    toggle_theme_to_light: "☀ ライト",
+    toggle_theme_to_dark: "☾ ダーク",
   },
   en: {
     placeholder: "search... (Enter to run / Esc to clear)",
-    loading: "loading...",
     no_data: "NO DATA",
     sessions_count: n => `${n} sessions`,
     no_results: "NO RESULTS",
     select_session: "SELECT A SESSION",
     entries_count: n => `${n} entries`,
     hits_count: n => `${n} hits`,
+    sessions_in_results: (s, h) => `${s} sessions / ${h} hits`,
     searching: "searching...",
     mode_session: "SESSION",
     mode_search: "SEARCH",
@@ -306,11 +367,17 @@ const I18N = {
     label_input: "input",
     msg_unit: "msg",
     line_label: "line",
-    toggle_label: "JA",
+    back_to_search: "Back to results",
+    copy_id: "Copy ID",
+    copied: "Copied",
+    toggle_lang: "JA",
+    toggle_theme_to_light: "☀ LIGHT",
+    toggle_theme_to_dark: "☾ DARK",
   },
 };
 
 let lang = localStorage.getItem("cclog-lang") || "ja";
+let theme = localStorage.getItem("cclog-theme") || "dark";
 const t = (k, ...a) => {
   const v = I18N[lang][k];
   return typeof v === "function" ? v(...a) : v;
@@ -324,6 +391,7 @@ let currentId = null;
 let mode = "empty";          // "empty" | "session" | "search"
 let lastQuery = "";
 let lastResults = null;
+let cameFromSearch = false;
 const collapsed = new Set();
 
 const $ = id => document.getElementById(id);
@@ -361,9 +429,17 @@ function highlight(text, q) {
 }
 function setStatus(s) { $("status").textContent = s; }
 
+function applyTheme() {
+  document.documentElement.setAttribute("data-theme", theme);
+  $("theme-toggle").textContent = theme === "dark"
+    ? t("toggle_theme_to_light")
+    : t("toggle_theme_to_dark");
+}
+
 function applyLang() {
   $("q").placeholder = t("placeholder");
-  $("lang-toggle").textContent = t("toggle_label");
+  $("lang-toggle").textContent = t("toggle_lang");
+  applyTheme();
   if (sessions.length === 0) setStatus(t("no_data"));
   else setStatus(t("sessions_count", sessions.length));
   renderSide();
@@ -407,15 +483,16 @@ function renderSide() {
           <span>${s.msg_count || 0} ${t("msg_unit")}</span>
           <span>${fmtSize(s.size || 0)}</span>
         </div>`;
-      el.onclick = () => openSession(s.id);
+      el.onclick = () => openSession(s.id, null, false);
       side.appendChild(el);
     }
   }
 }
 
-function openSession(id, scrollLine) {
+function openSession(id, scrollLine, fromSearch) {
   currentId = id;
   mode = "session";
+  cameFromSearch = !!fromSearch;
   document.querySelectorAll(".sess").forEach(e =>
     e.classList.toggle("active", e.dataset.id === id));
   renderSession(id, scrollLine);
@@ -425,27 +502,70 @@ function renderSession(id, scrollLine) {
   const messages = transcripts[id] || [];
   const main = $("content");
   main.innerHTML = "";
-  const tag = document.createElement("div");
-  tag.className = "mode-bar";
-  tag.innerHTML = `<span class="mode-tag session">${esc(t("mode_session"))}</span><span style="color:var(--text-dim)">${esc(id)}</span>`;
-  main.appendChild(tag);
+  const bar = document.createElement("div");
+  bar.className = "mode-bar";
+  let backBtn = "";
+  if (cameFromSearch && lastResults) {
+    backBtn = `<button id="back-btn" class="btn back">← ${esc(t("back_to_search"))}</button>`;
+  }
+  bar.innerHTML = `
+    <span class="mode-tag session">${esc(t("mode_session"))}</span>
+    <span class="session-id">${esc(id)}</span>
+    <button id="copy-id" class="btn copy">${esc(t("copy_id"))}</button>
+    ${backBtn}
+  `;
+  main.appendChild(bar);
+  $("copy-id").onclick = () => copyToClipboard(id, $("copy-id"));
+  if ($("back-btn")) {
+    $("back-btn").onclick = () => {
+      mode = "search";
+      cameFromSearch = false;
+      currentId = null;
+      document.querySelectorAll(".sess").forEach(e => e.classList.remove("active"));
+      renderResults(lastQuery, lastResults);
+    };
+  }
   const wrap = document.createElement("div");
   main.appendChild(wrap);
   for (const m of messages) wrap.appendChild(renderMsg(m));
   setStatus(t("entries_count", messages.length));
-  // scroll AFTER the layout is settled
   requestAnimationFrame(() => {
     if (scrollLine != null) {
       const target = wrap.querySelector(`[data-line="${scrollLine}"]`);
-      if (target) {
-        target.scrollIntoView({behavior: "smooth", block: "center"});
-      } else {
-        main.scrollTop = 0;
-      }
+      if (target) target.scrollIntoView({behavior: "smooth", block: "center"});
+      else main.scrollTop = 0;
     } else {
       main.scrollTop = 0;
     }
   });
+}
+
+function copyToClipboard(text, btn) {
+  const done = () => {
+    if (!btn) return;
+    btn.classList.add("copied");
+    const old = btn.textContent;
+    btn.textContent = t("copied");
+    setTimeout(() => {
+      btn.classList.remove("copied");
+      btn.textContent = old;
+    }, 1500);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+  } else {
+    fallbackCopy(text, done);
+  }
+}
+function fallbackCopy(text, done) {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.left = "-9999px";
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand("copy"); done(); }
+  catch(e) {} finally { document.body.removeChild(ta); }
 }
 
 function renderMsg(m) {
@@ -482,7 +602,6 @@ function renderMsg(m) {
   return el;
 }
 
-// Pull all searchable text from a parsed message
 function msgSearchableText(m) {
   if (m.kind === "user_text" || m.kind === "assistant_text" || m.kind === "thinking") return m.text || "";
   if (m.kind === "tool_use") {
@@ -498,25 +617,23 @@ function msgSearchableText(m) {
   return "";
 }
 
-function snippetAround(s, qLow, span = 100) {
+function snippetAround(s, qLow, span) {
   const lt = s.toLowerCase();
   const idx = lt.indexOf(qLow);
   if (idx < 0) return s.slice(0, 200);
   const start = Math.max(0, idx - 60);
-  const end = Math.min(s.length, idx + qLow.length + span);
+  const end = Math.min(s.length, idx + qLow.length + (span || 100));
   let out = s.slice(start, end);
   if (start > 0) out = "…" + out;
   if (end < s.length) out += "…";
   return out;
 }
 
-const SEARCH_LIMIT = 500;
+const SEARCH_LIMIT = 1000;
 
 function clientSearch(q) {
   const qLow = q.toLowerCase();
   const out = [];
-  // Dedup key uses session_id + kind + line + first 80 chars of snippet
-  // (server-side already deduped messages, so this is mainly safety net)
   const seen = new Set();
   for (const sess of sessions) {
     const msgs = transcripts[sess.id] || [];
@@ -544,39 +661,62 @@ function clientSearch(q) {
 function renderResults(q, results) {
   const main = $("content");
   main.innerHTML = "";
-  const tag = document.createElement("div");
-  tag.className = "mode-bar";
-  tag.innerHTML = `<span class="mode-tag search">${esc(t("mode_search"))}</span><span style="color:var(--text-dim)">"${esc(q)}" - ${t("hits_count", results.length)}</span>`;
-  main.appendChild(tag);
+  const bar = document.createElement("div");
+  bar.className = "mode-bar";
+  bar.innerHTML = `
+    <span class="mode-tag search">${esc(t("mode_search"))}</span>
+    <span class="session-id">"${esc(q)}"</span>
+  `;
+  main.appendChild(bar);
   if (!results || results.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty";
     empty.textContent = t("no_results");
     main.appendChild(empty);
+    setStatus(t("hits_count", 0));
     main.scrollTop = 0;
     return;
   }
+  // Group by session, preserving insertion order (= original ranking)
+  const grouped = new Map();
+  for (const r of results) {
+    if (!grouped.has(r.session_id)) grouped.set(r.session_id, []);
+    grouped.get(r.session_id).push(r);
+  }
+  setStatus(t("sessions_in_results", grouped.size, results.length));
+
   const wrap = document.createElement("div");
   wrap.className = "results";
   main.appendChild(wrap);
-  for (const r of results) {
-    const sess = sessions.find(s => s.id === r.session_id);
-    const title = sess ? (sess.title || sess.first_msg || sess.id) : r.session_id;
+
+  for (const [sid, hits] of grouped.entries()) {
+    const sess = sessions.find(s => s.id === sid);
+    const title = sess ? (sess.title || sess.first_msg || sid) : sid;
     const cwd = sess ? sess.cwd : "";
-    const where = `${cwd} - ${t("line_label")} ${r.line}`;
-    const el = document.createElement("div");
-    el.className = "result";
-    el.innerHTML = `
-      <div class="head">
-        <span>${esc(title)}</span>
-        <span class="kind">${esc(r.kind || "")}</span>
-        <span class="where">${esc(where)}</span>
-      </div>
-      <div class="snip">${highlight(r.snippet, q)}</div>`;
-    el.onclick = () => openSession(r.session_id, r.line);
-    wrap.appendChild(el);
+    const group = document.createElement("div");
+    group.className = "result-group";
+    const head = document.createElement("div");
+    head.className = "result-group-head";
+    head.innerHTML = `
+      <span class="gtitle">${esc(title)}</span>
+      <span class="gcount">${hits.length} ${t("msg_unit")}</span>
+      <span class="gcwd">${esc(cwd)}</span>
+    `;
+    head.onclick = () => openSession(sid, hits[0].line, true);
+    group.appendChild(head);
+    for (const h of hits) {
+      const hit = document.createElement("div");
+      hit.className = "result-hit";
+      hit.innerHTML = `
+        <span class="hkind">${esc(h.kind || "")}</span>
+        <span class="hline">${t("line_label")} ${h.line}</span>
+        <span class="hsnip">${highlight(h.snippet, q)}</span>
+      `;
+      hit.onclick = () => openSession(sid, h.line, true);
+      group.appendChild(hit);
+    }
+    wrap.appendChild(group);
   }
-  // Reset scroll for new results
   requestAnimationFrame(() => { main.scrollTop = 0; });
 }
 
@@ -589,6 +729,7 @@ qInput.addEventListener("keydown", e => {
     qInput.value = "";
     lastQuery = "";
     lastResults = null;
+    cameFromSearch = false;
     if (currentId) { mode = "session"; renderSession(currentId); }
     else { mode = "empty"; $("content").innerHTML = `<div class="empty">${t("select_session")}</div>`; }
   }
@@ -598,12 +739,11 @@ function runSearch(q) {
   if (!q) return;
   lastQuery = q;
   mode = "search";
+  cameFromSearch = false;
   setStatus(t("searching"));
-  // run in next frame so the status update paints first
   requestAnimationFrame(() => {
     const r = clientSearch(q);
     lastResults = r;
-    setStatus(t("hits_count", r.length));
     renderResults(q, r);
   });
 }
@@ -612,6 +752,12 @@ $("lang-toggle").addEventListener("click", () => {
   lang = lang === "ja" ? "en" : "ja";
   localStorage.setItem("cclog-lang", lang);
   applyLang();
+});
+
+$("theme-toggle").addEventListener("click", () => {
+  theme = theme === "dark" ? "light" : "dark";
+  localStorage.setItem("cclog-theme", theme);
+  applyTheme();
 });
 
 try {
