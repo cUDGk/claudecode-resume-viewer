@@ -71,6 +71,18 @@ struct ParsedSession {
     first_msg: String,
     cwd: String,
     messages: Vec<Value>,
+    first_ts: String,
+    last_ts: String,
+    counts: Counts,
+}
+
+#[derive(Default)]
+struct Counts {
+    user_text: u32,
+    assistant_text: u32,
+    thinking: u32,
+    tool_use: u32,
+    tool_result: u32,
 }
 
 // Per-field byte caps. Without these, tool_result blobs (file contents,
@@ -133,6 +145,9 @@ fn parse_full(path: &Path) -> ParsedSession {
         first_msg: String::new(),
         cwd: String::new(),
         messages: Vec::new(),
+        first_ts: String::new(),
+        last_ts: String::new(),
+        counts: Counts::default(),
     };
     let f = match File::open(path) {
         Ok(f) => f,
@@ -185,6 +200,18 @@ fn parse_full(path: &Path) -> ParsedSession {
             continue;
         }
 
+        let timestamp = v
+            .get("timestamp")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string();
+        if !timestamp.is_empty() {
+            if p.first_ts.is_empty() {
+                p.first_ts = timestamp.clone();
+            }
+            p.last_ts = timestamp.clone();
+        }
+
         let msg = match v.get("message") {
             Some(m) => m,
             None => continue,
@@ -207,12 +234,16 @@ fn parse_full(path: &Path) -> ParsedSession {
                         p.first_msg = s.chars().take(120).collect();
                     }
                     let txt = truncate_str(s, MAX_TEXT_BYTES);
-                    p.messages
-                        .push(json!({"kind": "user_text", "text": txt, "line": line1}));
+                    p.messages.push(json!({
+                        "kind": "user_text", "text": txt, "line": line1, "ts": &timestamp,
+                    }));
+                    p.counts.user_text += 1;
                 } else if role == "assistant" {
                     let txt = truncate_str(s, MAX_TEXT_BYTES);
-                    p.messages
-                        .push(json!({"kind": "assistant_text", "text": txt, "line": line1}));
+                    p.messages.push(json!({
+                        "kind": "assistant_text", "text": txt, "line": line1, "ts": &timestamp,
+                    }));
+                    p.counts.assistant_text += 1;
                 }
             }
             Value::Array(arr) => {
@@ -225,9 +256,10 @@ fn parse_full(path: &Path) -> ParsedSession {
                             }
                             let t = block.get("text").and_then(|x| x.as_str()).unwrap_or("");
                             let txt = truncate_str(t, MAX_TEXT_BYTES);
-                            p.messages.push(
-                                json!({"kind": "assistant_text", "text": txt, "line": line1}),
-                            );
+                            p.messages.push(json!({
+                                "kind": "assistant_text", "text": txt, "line": line1, "ts": &timestamp,
+                            }));
+                            p.counts.assistant_text += 1;
                         }
                         "thinking" => {
                             let t = block
@@ -239,8 +271,10 @@ fn parse_full(path: &Path) -> ParsedSession {
                                 continue;
                             }
                             let txt = truncate_str(t, MAX_THINKING_BYTES);
-                            p.messages
-                                .push(json!({"kind": "thinking", "text": txt, "line": line1}));
+                            p.messages.push(json!({
+                                "kind": "thinking", "text": txt, "line": line1, "ts": &timestamp,
+                            }));
+                            p.counts.thinking += 1;
                         }
                         "tool_use" => {
                             let bid = block
@@ -260,7 +294,9 @@ fn parse_full(path: &Path) -> ParsedSession {
                                 "input": input,
                                 "id": block.get("id").cloned().unwrap_or(Value::Null),
                                 "line": line1,
+                                "ts": &timestamp,
                             }));
+                            p.counts.tool_use += 1;
                         }
                         "tool_result" => {
                             let tid = block
@@ -273,7 +309,6 @@ fn parse_full(path: &Path) -> ParsedSession {
                             }
                             let mut tr_content =
                                 block.get("content").cloned().unwrap_or(Value::Null);
-                            // tool_result.content may be a single string OR an array of blocks
                             if let Value::String(s) = &tr_content {
                                 tr_content = Value::String(truncate_str(s, MAX_TOOL_RESULT_BYTES));
                             } else {
@@ -284,7 +319,9 @@ fn parse_full(path: &Path) -> ParsedSession {
                                 "tool_use_id": block.get("tool_use_id").cloned().unwrap_or(Value::Null),
                                 "content": tr_content,
                                 "line": line1,
+                                "ts": &timestamp,
                             }));
+                            p.counts.tool_result += 1;
                         }
                         _ => {}
                     }
@@ -349,6 +386,15 @@ fn main() {
             "modified": modified,
             "size": size,
             "msg_count": parsed.messages.len(),
+            "first_ts": parsed.first_ts,
+            "last_ts": parsed.last_ts,
+            "counts": {
+                "user_text": parsed.counts.user_text,
+                "assistant_text": parsed.counts.assistant_text,
+                "thinking": parsed.counts.thinking,
+                "tool_use": parsed.counts.tool_use,
+                "tool_result": parsed.counts.tool_result,
+            },
         }));
         transcripts.insert(id, parsed.messages);
 

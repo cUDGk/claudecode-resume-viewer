@@ -80,10 +80,32 @@
   main { display: flex; flex: 1; overflow: hidden; }
   #side {
     width: 380px;
-    overflow-y: auto;
     background: var(--panel);
     border-right: 1px solid var(--border);
     flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .side-filter {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+    flex-shrink: 0;
+  }
+  .side-filter input {
+    width: 100%;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border-strong);
+    padding: 6px 10px;
+    font: inherit;
+    font-size: 13px;
+    outline: none;
+  }
+  .side-filter input:focus { border-color: var(--blue); }
+  .side-list {
+    overflow-y: auto;
+    flex: 1;
   }
   .proj {
     padding: 10px 14px 7px 14px;
@@ -137,11 +159,24 @@
     background: var(--panel);
     position: sticky;
     top: 0;
-    z-index: 1;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .bar-row {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
     gap: 10px;
+  }
+  .bar-row .session-title {
+    color: var(--text);
+    font-size: 14px;
+    font-weight: bold;
+    word-break: break-word;
+    flex: 1;
+    min-width: 0;
   }
   .mode-bar .session-id {
     color: var(--text-dim);
@@ -149,6 +184,31 @@
     word-break: break-all;
     flex: 1;
     min-width: 0;
+  }
+  .mode-bar .session-id-small {
+    color: var(--text-mute);
+    font-size: 11px;
+    word-break: break-all;
+  }
+  .kc {
+    font-size: 11px;
+    padding: 1px 8px;
+    border: 1px solid var(--border-strong);
+    color: var(--text-mute);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    flex-shrink: 0;
+  }
+  .kc strong { color: var(--text); font-weight: bold; }
+  .kc.kc-user { border-color: var(--blue); color: var(--blue); }
+  .kc.kc-user strong { color: var(--blue); }
+  .kc.kc-asst, .kc.kc-tool { border-color: var(--orange); color: var(--orange); }
+  .kc.kc-asst strong, .kc.kc-tool strong { color: var(--orange); }
+  .kc.kc-time {
+    border-color: var(--text-mute);
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--text-dim);
   }
   .msg {
     border-bottom: 1px solid var(--border);
@@ -160,6 +220,17 @@
     margin-bottom: 6px;
     text-transform: uppercase;
     letter-spacing: 1.5px;
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+  .msg .role .ts {
+    margin-left: auto;
+    color: var(--text-mute);
+    font-size: 11px;
+    text-transform: none;
+    letter-spacing: 0;
+    white-space: nowrap;
   }
   .msg.user_text .role { color: var(--blue); }
   .msg.assistant_text .role { color: var(--orange); }
@@ -344,7 +415,12 @@
   <span class="status" id="status"></span>
 </header>
 <main>
-  <aside id="side"></aside>
+  <aside id="side">
+    <div class="side-filter">
+      <input id="side-q" autocomplete="off">
+    </div>
+    <div class="side-list" id="side-list"></div>
+  </aside>
   <section id="content"></section>
 </main>
 <script src="cclog-data.js"></script>
@@ -380,6 +456,18 @@ const I18N = {
     toggle_lang: "EN",
     toggle_theme_to_light: "☀ ライト",
     toggle_theme_to_dark: "☾ ダーク",
+    side_filter: "セッション絞り込み...",
+    chip_user: "ユーザー",
+    chip_asst: "アシスタント",
+    chip_think: "思考",
+    chip_tool: "ツール",
+    chip_result: "結果",
+    title_default: n => `cclog (${n} セッション)`,
+    title_session: t => `cclog · ${t}`,
+    title_search: (q, n) => `cclog · 検索: ${q} (${n})`,
+    duration_hm: (h, m) => `${h}時間${m}分`,
+    duration_m: m => `${m}分`,
+    duration_s: s => `${s}秒`,
   },
   en: {
     placeholder: "search... (Enter to run / Esc to clear)",
@@ -411,6 +499,18 @@ const I18N = {
     toggle_lang: "JA",
     toggle_theme_to_light: "☀ LIGHT",
     toggle_theme_to_dark: "☾ DARK",
+    side_filter: "filter sessions...",
+    chip_user: "USER",
+    chip_asst: "ASST",
+    chip_think: "THINK",
+    chip_tool: "TOOL",
+    chip_result: "RESULT",
+    title_default: n => `cclog (${n} sessions)`,
+    title_session: t => `cclog · ${t}`,
+    title_search: (q, n) => `cclog · search: ${q} (${n})`,
+    duration_hm: (h, m) => `${h}h ${m}m`,
+    duration_m: m => `${m}m`,
+    duration_s: s => `${s}s`,
   },
 };
 
@@ -451,6 +551,36 @@ function fmtSize(b) {
   if (b < 1024*1024) return (b/1024).toFixed(0) + "K";
   return (b/1024/1024).toFixed(1) + "M";
 }
+function tsToMs(s) {
+  if (!s) return null;
+  const ms = Date.parse(s);
+  return isNaN(ms) ? null : ms;
+}
+function fmtTimeShort(s) {
+  const ms = tsToMs(s);
+  if (ms == null) return "";
+  return fmtDate(ms);
+}
+function fmtClock(s) {
+  const ms = tsToMs(s);
+  if (ms == null) return "";
+  const d = new Date(ms);
+  const p = n => String(n).padStart(2,"0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+function fmtDuration(ms) {
+  if (ms == null || ms < 0) return "";
+  const sec = Math.round(ms / 1000);
+  if (sec < 60) return t("duration_s", sec);
+  const min = Math.round(sec / 60);
+  if (min < 60) return t("duration_m", min);
+  const h = Math.floor(min / 60);
+  const mm = min % 60;
+  return t("duration_hm", h, mm);
+}
+function setTitle(text) {
+  document.title = text;
+}
 function highlight(text, q) {
   if (!q) return esc(text);
   const escQ = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -478,6 +608,7 @@ function applyTheme() {
 
 function applyLang() {
   $("q").placeholder = t("placeholder");
+  $("side-q").placeholder = t("side_filter");
   $("lang-toggle").textContent = t("toggle_lang");
   applyTheme();
   if (sessions.length === 0) setStatus(t("no_data"));
@@ -485,6 +616,7 @@ function applyLang() {
   renderSide();
   if (mode === "empty") {
     $("content").innerHTML = `<div class="empty">${t("select_session")}</div>`;
+    setTitle(t("title_default", sessions.length));
   } else if (mode === "session" && currentId) {
     renderSession(currentId);
   } else if (mode === "search") {
@@ -492,26 +624,43 @@ function applyLang() {
   }
 }
 
+let sideFilterQ = "";
+function sessionMatchesFilter(s, q) {
+  if (!q) return true;
+  const ql = q.toLowerCase();
+  return (
+    (s.title || "").toLowerCase().includes(ql) ||
+    (s.first_msg || "").toLowerCase().includes(ql) ||
+    (s.cwd || "").toLowerCase().includes(ql) ||
+    (s.id || "").toLowerCase().includes(ql)
+  );
+}
+
 function renderSide() {
-  const side = $("side");
+  const list = $("side-list");
+  const filtered = sessions.filter(s => sessionMatchesFilter(s, sideFilterQ));
   const groups = {};
-  for (const s of sessions) (groups[s.cwd || "(unknown)"] ??= []).push(s);
+  for (const s of filtered) (groups[s.cwd || "(unknown)"] ??= []).push(s);
   const cwds = Object.keys(groups).sort((a,b) =>
     Math.max(...groups[b].map(x => x.modified || 0)) - Math.max(...groups[a].map(x => x.modified || 0)));
-  side.innerHTML = "";
+  list.innerHTML = "";
+  if (filtered.length === 0) {
+    list.innerHTML = `<div class="empty">${esc(t("no_results"))}</div>`;
+    return;
+  }
   for (const cwd of cwds) {
-    const list = groups[cwd].sort((a,b) => (b.modified || 0) - (a.modified || 0));
+    const sub = groups[cwd].sort((a,b) => (b.modified || 0) - (a.modified || 0));
     const isCollapsed = collapsed.has(cwd);
     const proj = document.createElement("div");
     proj.className = "proj" + (isCollapsed ? " collapsed" : "");
-    proj.textContent = `${cwd} (${list.length})`;
+    proj.textContent = `${cwd} (${sub.length})`;
     proj.onclick = () => {
       if (collapsed.has(cwd)) collapsed.delete(cwd); else collapsed.add(cwd);
       renderSide();
     };
-    side.appendChild(proj);
+    list.appendChild(proj);
     if (isCollapsed) continue;
-    for (const s of list) {
+    for (const s of sub) {
       const el = document.createElement("div");
       el.className = "sess" + (s.id === currentId ? " active" : "");
       el.dataset.id = s.id;
@@ -524,7 +673,7 @@ function renderSide() {
           <span>${fmtSize(s.size || 0)}</span>
         </div>`;
       el.onclick = () => openSession(s.id, null, false);
-      side.appendChild(el);
+      list.appendChild(el);
     }
   }
 }
@@ -535,24 +684,57 @@ function openSession(id, scrollLine, fromSearch) {
   cameFromSearch = !!fromSearch;
   document.querySelectorAll(".sess").forEach(e =>
     e.classList.toggle("active", e.dataset.id === id));
+  updateHashForSession(id, scrollLine);
   renderSession(id, scrollLine);
 }
 
 function renderSession(id, scrollLine) {
   const messages = transcripts[id] || [];
+  const sess = sessions.find(s => s.id === id);
+  const title = sess ? (sess.title || sess.first_msg || id) : id;
   const main = $("content");
   main.innerHTML = "";
+  setTitle(t("title_session", title));
+
   const bar = document.createElement("div");
   bar.className = "mode-bar";
   let backBtn = "";
   if (cameFromSearch && lastResults) {
     backBtn = `<button id="back-btn" class="btn back">← ${esc(t("back_to_search"))}</button>`;
   }
+  // Time range / duration
+  const firstMs = sess ? tsToMs(sess.first_ts) : null;
+  const lastMs = sess ? tsToMs(sess.last_ts) : null;
+  let timeStr = "";
+  if (firstMs && lastMs) {
+    const dur = fmtDuration(lastMs - firstMs);
+    timeStr = `${fmtDate(firstMs)} → ${fmtDate(lastMs)}${dur ? " (" + dur + ")" : ""}`;
+  } else if (firstMs) {
+    timeStr = fmtDate(firstMs);
+  }
+  // Kind chips
+  const c = (sess && sess.counts) || {};
+  const chip = (cls, label, val) => val
+    ? `<span class="kc ${cls}">${esc(label)} <strong>${val}</strong></span>` : "";
+  const chips = [
+    chip("kc-user", t("chip_user"), c.user_text || 0),
+    chip("kc-asst", t("chip_asst"), c.assistant_text || 0),
+    chip("kc-think", t("chip_think"), c.thinking || 0),
+    chip("kc-tool", t("chip_tool"), c.tool_use || 0),
+    chip("kc-tool", t("chip_result"), c.tool_result || 0),
+  ].join("");
   bar.innerHTML = `
-    <span class="mode-tag session">${esc(t("mode_session"))}</span>
-    <span class="session-id">${esc(id)}</span>
-    <button id="copy-id" class="btn copy">${esc(t("copy_id"))}</button>
-    ${backBtn}
+    <div class="bar-row">
+      <span class="mode-tag session">${esc(t("mode_session"))}</span>
+      <span class="session-title">${esc(title)}</span>
+      <button id="copy-id" class="btn copy">${esc(t("copy_id"))}</button>
+      ${backBtn}
+    </div>
+    <div class="bar-row">
+      ${chips}
+      ${timeStr ? `<span class="kc kc-time">${esc(timeStr)}</span>` : ""}
+    </div>
+    <div class="session-id-small">${esc(id)}</div>
   `;
   main.appendChild(bar);
   $("copy-id").onclick = () => copyToClipboard(id, $("copy-id"));
@@ -663,7 +845,10 @@ function renderMsg(m, sessId, idx) {
     header = t("role_unknown");
     body = `<pre>${esc(JSON.stringify(m, null, 2))}</pre>`;
   }
-  el.innerHTML = `<div class="role">${esc(header)}</div>${body}`;
+  const tsLabel = m.ts ? fmtClock(m.ts) : "";
+  const tsEl = tsLabel
+    ? `<span class="ts" title="${esc(fmtTimeShort(m.ts))}">${esc(tsLabel)}</span>` : "";
+  el.innerHTML = `<div class="role"><span>${esc(header)}</span>${tsEl}</div>${body}`;
   return el;
 }
 
@@ -750,11 +935,14 @@ function clientSearch(q) {
 function renderResults(q, results) {
   const main = $("content");
   main.innerHTML = "";
+  setTitle(t("title_search", q, (results || []).length));
   const bar = document.createElement("div");
   bar.className = "mode-bar";
   bar.innerHTML = `
-    <span class="mode-tag search">${esc(t("mode_search"))}</span>
-    <span class="session-id">"${esc(q)}"</span>
+    <div class="bar-row">
+      <span class="mode-tag search">${esc(t("mode_search"))}</span>
+      <span class="session-id">"${esc(q)}"</span>
+    </div>
   `;
   main.appendChild(bar);
   if (!results || results.length === 0) {
@@ -894,8 +1082,50 @@ $("theme-toggle").addEventListener("click", () => {
   applyTheme();
 });
 
+// Sidebar filter input
+$("side-q").addEventListener("input", e => {
+  sideFilterQ = e.target.value;
+  renderSide();
+});
+
+// URL hash management — #/<sessionId> or #/<sessionId>/<line>
+let suppressHashUpdate = false;
+function updateHashForSession(id, line) {
+  if (!id) return;
+  suppressHashUpdate = true;
+  location.hash = line != null ? `/${id}/${line}` : `/${id}`;
+}
+function readHash() {
+  const h = location.hash || "";
+  if (!h.startsWith("#/")) return null;
+  const parts = h.slice(2).split("/");
+  return { id: parts[0] || null, line: parts[1] ? +parts[1] : null };
+}
+window.addEventListener("hashchange", () => {
+  if (suppressHashUpdate) { suppressHashUpdate = false; return; }
+  const h = readHash();
+  if (h && h.id && transcripts[h.id]) openSession(h.id, h.line, false);
+});
+
+
+// Keyboard: "/" to focus the global search box
+document.addEventListener("keydown", e => {
+  if (e.key === "/" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    const tag = (e.target && e.target.tagName) || "";
+    if (tag === "INPUT" || tag === "TEXTAREA") return;
+    e.preventDefault();
+    $("q").focus();
+    $("q").select();
+  }
+});
+
 try {
   applyLang();
+  // restore from URL hash if any
+  const h = readHash();
+  if (h && h.id && transcripts[h.id]) {
+    openSession(h.id, h.line, false);
+  }
 } catch (err) {
   $("status").textContent = "ERR";
   $("content").innerHTML = `<div class="empty" style="color:var(--orange);white-space:pre-wrap;text-align:left;padding:24px;">JavaScript error:\n\n${esc(err && err.stack || String(err))}</div>`;
