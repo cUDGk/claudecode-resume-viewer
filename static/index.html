@@ -217,13 +217,24 @@
     align-items: baseline;
     flex-wrap: wrap;
     gap: 10px;
+    user-select: none;
   }
   .result-group-head:hover { background: var(--border); }
+  .result-group-head .fold {
+    color: var(--text-mute);
+    font-size: 14px;
+    width: 14px;
+    flex-shrink: 0;
+  }
+  .result-group.collapsed .result-group-head .fold::before { content: "+"; }
+  .result-group:not(.collapsed) .result-group-head .fold::before { content: "-"; }
+  .result-group.collapsed .result-hits { display: none; }
   .result-group-head .gtitle {
     color: var(--blue);
     font-size: 14px;
     font-weight: bold;
   }
+  .result-group-head .gtitle:hover { text-decoration: underline; }
   .result-group-head .gcount {
     color: var(--orange);
     font-size: 12px;
@@ -234,6 +245,27 @@
   .result-group-head .gcwd {
     color: var(--text-mute);
     font-size: 12px;
+  }
+  .result-group-head .gopen {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--blue);
+    border: 1px solid var(--blue);
+    padding: 2px 8px;
+    background: transparent;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .result-group-head .gopen:hover { background: var(--blue); color: var(--bg); }
+  .results-bulk {
+    padding: 8px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+    display: flex;
+    gap: 10px;
+    position: sticky;
+    top: 49px;
+    z-index: 1;
   }
   .result-hit {
     padding: 8px 20px 8px 36px;
@@ -342,6 +374,9 @@ const I18N = {
     back_to_search: "検索結果に戻る",
     copy_id: "ID コピー",
     copied: "コピー済",
+    open: "開く",
+    fold_all: "全て閉じる",
+    unfold_all: "全て展開",
     toggle_lang: "EN",
     toggle_theme_to_light: "☀ ライト",
     toggle_theme_to_dark: "☾ ダーク",
@@ -370,6 +405,9 @@ const I18N = {
     back_to_search: "Back to results",
     copy_id: "Copy ID",
     copied: "Copied",
+    open: "Open",
+    fold_all: "Fold all",
+    unfold_all: "Unfold all",
     toggle_lang: "JA",
     toggle_theme_to_light: "☀ LIGHT",
     toggle_theme_to_dark: "☾ DARK",
@@ -393,6 +431,8 @@ let lastQuery = "";
 let lastResults = null;
 let cameFromSearch = false;
 const collapsed = new Set();
+const groupCollapsed = new Set();
+let renderToken = 0;          // increments to cancel in-flight chunked renders
 
 const $ = id => document.getElementById(id);
 
@@ -525,19 +565,40 @@ function renderSession(id, scrollLine) {
       renderResults(lastQuery, lastResults);
     };
   }
+  setStatus(t("entries_count", messages.length));
+  if (messages.length === 0) {
+    main.scrollTop = 0;
+    return;
+  }
   const wrap = document.createElement("div");
   main.appendChild(wrap);
-  for (const m of messages) wrap.appendChild(renderMsg(m));
-  setStatus(t("entries_count", messages.length));
-  requestAnimationFrame(() => {
-    if (scrollLine != null) {
-      const target = wrap.querySelector(`[data-line="${scrollLine}"]`);
-      if (target) target.scrollIntoView({behavior: "smooth", block: "center"});
-      else main.scrollTop = 0;
-    } else {
-      main.scrollTop = 0;
+
+  // Cancel any in-flight chunked render and start a new one
+  const myToken = ++renderToken;
+  let i = 0;
+  let scrolled = false;
+  const CHUNK = 150;
+  if (scrollLine == null) main.scrollTop = 0;
+
+  const renderChunk = () => {
+    if (myToken !== renderToken) return;     // superseded
+    const end = Math.min(i + CHUNK, messages.length);
+    const frag = document.createDocumentFragment();
+    for (let j = i; j < end; j++) {
+      frag.appendChild(renderMsg(messages[j], id, j));
     }
-  });
+    wrap.appendChild(frag);
+    i = end;
+    if (scrollLine != null && !scrolled) {
+      const target = wrap.querySelector(`[data-line="${scrollLine}"]`);
+      if (target) {
+        target.scrollIntoView({behavior: "auto", block: "center"});
+        scrolled = true;
+      }
+    }
+    if (i < messages.length) requestAnimationFrame(renderChunk);
+  };
+  renderChunk();
 }
 
 function copyToClipboard(text, btn) {
@@ -568,10 +629,14 @@ function fallbackCopy(text, done) {
   catch(e) {} finally { document.body.removeChild(ta); }
 }
 
-function renderMsg(m) {
+// Render a message but defer the heavy <pre> content until the user opens
+// the <details>. This avoids creating thousands of large text nodes on long
+// sessions; the <pre> is built on toggle by the listener at #content.
+function renderMsg(m, sessId, idx) {
   const el = document.createElement("div");
   el.className = "msg " + (m.kind || "unknown");
   el.dataset.line = m.line;
+  const sidAttr = `data-sid="${esc(sessId)}" data-idx="${idx}"`;
   let header = "";
   let body = "";
   if (m.kind === "user_text") {
@@ -583,17 +648,17 @@ function renderMsg(m) {
   } else if (m.kind === "thinking") {
     header = t("role_thinking");
     const tx = m.text || "";
-    body = `<details><summary>${esc(tx.slice(0,140))}${tx.length>140?"...":""}</summary><pre>${esc(tx)}</pre></details>`;
+    body = `<details ${sidAttr} data-k="thinking"><summary>${esc(tx.slice(0,140))}${tx.length>140?"...":""}</summary></details>`;
   } else if (m.kind === "tool_use") {
     header = `${t("role_tool")} > ${m.name || "?"}`;
-    body = `<details><summary>${esc(t("label_input"))}</summary><pre>${esc(JSON.stringify(m.input, null, 2))}</pre></details>`;
+    body = `<details ${sidAttr} data-k="tool_use"><summary>${esc(t("label_input"))}</summary></details>`;
   } else if (m.kind === "tool_result") {
     header = t("role_result");
     let text = m.content;
-    if (typeof text !== "string") text = JSON.stringify(text, null, 2);
+    if (typeof text !== "string") text = JSON.stringify(text);
     if (text == null) text = "";
     const preview = text.slice(0, 140).replace(/\s+/g, " ");
-    body = `<details><summary>${esc(preview)}${text.length>140?"...":""}</summary><pre>${esc(text)}</pre></details>`;
+    body = `<details ${sidAttr} data-k="tool_result"><summary>${esc(preview)}${text.length>140?"...":""}</summary></details>`;
   } else {
     header = t("role_unknown");
     body = `<pre>${esc(JSON.stringify(m, null, 2))}</pre>`;
@@ -601,6 +666,30 @@ function renderMsg(m) {
   el.innerHTML = `<div class="role">${esc(header)}</div>${body}`;
   return el;
 }
+
+// Lazy-populate <pre> when a <details> opens. <toggle> doesn't bubble, so we
+// listen with capture=true on the scroll container.
+document.getElementById("content").addEventListener("toggle", function(e) {
+  const det = e.target;
+  if (!det || det.tagName !== "DETAILS" || !det.open) return;
+  if (det.querySelector("pre")) return;     // already populated
+  const sid = det.dataset.sid;
+  const idx = +det.dataset.idx;
+  const k = det.dataset.k;
+  if (!sid || isNaN(idx)) return;
+  const m = (transcripts[sid] || [])[idx];
+  if (!m) return;
+  let text = "";
+  if (k === "thinking") text = m.text || "";
+  else if (k === "tool_use") text = JSON.stringify(m.input, null, 2);
+  else if (k === "tool_result") {
+    const c = m.content;
+    text = c == null ? "" : (typeof c === "string" ? c : JSON.stringify(c, null, 2));
+  }
+  const pre = document.createElement("pre");
+  pre.textContent = text;
+  det.appendChild(pre);
+}, true);
 
 function msgSearchableText(m) {
   if (m.kind === "user_text" || m.kind === "assistant_text" || m.kind === "thinking") return m.text || "";
@@ -685,25 +774,59 @@ function renderResults(q, results) {
   }
   setStatus(t("sessions_in_results", grouped.size, results.length));
 
+  // Bulk fold/unfold buttons
+  const bulk = document.createElement("div");
+  bulk.className = "results-bulk";
+  bulk.innerHTML = `
+    <button class="btn" id="fold-all">${esc(t("fold_all"))}</button>
+    <button class="btn" id="unfold-all">${esc(t("unfold_all"))}</button>
+  `;
+  main.appendChild(bulk);
+
   const wrap = document.createElement("div");
   wrap.className = "results";
   main.appendChild(wrap);
 
+  // If many sessions, default-collapse to keep the page snappy.
+  // (Skip this auto-collapse on subsequent re-renders so user's manual
+  //  toggles aren't undone — guard via groupCollapsed having any entry.)
+  const autoCollapse = grouped.size > 8 && groupCollapsed.size === 0;
+
   for (const [sid, hits] of grouped.entries()) {
+    if (autoCollapse) groupCollapsed.add(sid);
     const sess = sessions.find(s => s.id === sid);
     const title = sess ? (sess.title || sess.first_msg || sid) : sid;
     const cwd = sess ? sess.cwd : "";
+    const isFolded = groupCollapsed.has(sid);
     const group = document.createElement("div");
-    group.className = "result-group";
+    group.className = "result-group" + (isFolded ? " collapsed" : "");
     const head = document.createElement("div");
     head.className = "result-group-head";
     head.innerHTML = `
+      <span class="fold"></span>
       <span class="gtitle">${esc(title)}</span>
       <span class="gcount">${hits.length} ${t("msg_unit")}</span>
       <span class="gcwd">${esc(cwd)}</span>
+      <button class="gopen">${esc(t("open"))}</button>
     `;
-    head.onclick = () => openSession(sid, hits[0].line, true);
+    // Header click toggles fold; the title and the OPEN button do their own thing
+    head.addEventListener("click", e => {
+      if (e.target.classList.contains("gopen") || e.target.classList.contains("gtitle")) return;
+      group.classList.toggle("collapsed");
+      if (group.classList.contains("collapsed")) groupCollapsed.add(sid);
+      else groupCollapsed.delete(sid);
+    });
+    head.querySelector(".gtitle").addEventListener("click", e => {
+      e.stopPropagation();
+      openSession(sid, hits[0].line, true);
+    });
+    head.querySelector(".gopen").addEventListener("click", e => {
+      e.stopPropagation();
+      openSession(sid, hits[0].line, true);
+    });
     group.appendChild(head);
+    const hitsWrap = document.createElement("div");
+    hitsWrap.className = "result-hits";
     for (const h of hits) {
       const hit = document.createElement("div");
       hit.className = "result-hit";
@@ -712,11 +835,22 @@ function renderResults(q, results) {
         <span class="hline">${t("line_label")} ${h.line}</span>
         <span class="hsnip">${highlight(h.snippet, q)}</span>
       `;
-      hit.onclick = () => openSession(sid, h.line, true);
-      group.appendChild(hit);
+      hit.addEventListener("click", () => openSession(sid, h.line, true));
+      hitsWrap.appendChild(hit);
     }
+    group.appendChild(hitsWrap);
     wrap.appendChild(group);
   }
+
+  $("fold-all").addEventListener("click", () => {
+    for (const sid of grouped.keys()) groupCollapsed.add(sid);
+    document.querySelectorAll(".result-group").forEach(g => g.classList.add("collapsed"));
+  });
+  $("unfold-all").addEventListener("click", () => {
+    groupCollapsed.clear();
+    document.querySelectorAll(".result-group").forEach(g => g.classList.remove("collapsed"));
+  });
+
   requestAnimationFrame(() => { main.scrollTop = 0; });
 }
 
