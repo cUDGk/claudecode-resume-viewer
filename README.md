@@ -50,7 +50,7 @@ cargo build --release
 
 ### 依存
 
-- Rust 1.78 以降（実装は `serde_json` のみ依存）
+- Rust 1.94 以降（実装は `serde_json` のみ依存）
 - Claude Code がインストール済みで `~/.claude/projects/` に履歴がある
 
 ## 使い方
@@ -111,7 +111,7 @@ flowchart LR
 | ツール入力 (tool_use.input) 内の文字列 | 4KB |
 | ツール結果 (tool_result.content) | 4KB |
 
-切り詰め時は `[+N bytes truncated]` で切り捨てバイト数が表示される。完全な内容を見たい場合は元の `.jsonl` を直接見る。
+切り詰め時は `... [+N bytes truncated]` で切り捨てバイト数が表示される。完全な内容を見たい場合は元の `.jsonl` を直接見る。
 
 ## ライセンス
 
